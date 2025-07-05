@@ -21,13 +21,13 @@ export default defineConfig((cfg) =>
         rollupOptions: {
           output: {
             preserveModules: true,
-            preserveModulesRoot: 'lib'
+            preserveModulesRoot: 'src'
           },
           external: ['react', 'react-dom']
         },
         lib: {
           entry: {
-            index: resolve(__dirname, 'lib/index.ts')
+            index: resolve(__dirname, 'src/index.ts')
           },
           name: 'InvenTree',
           formats: ['es']
@@ -35,10 +35,10 @@ export default defineConfig((cfg) =>
       },
       plugins: [
         dts({
-          entryRoot: 'lib',
+          entryRoot: 'src',
           outDir: 'dist',
           insertTypesEntry: true, // Ensures `dist/index.d.ts` is generated
-          exclude: ['node_modules/**/*', 'src/**/*']
+          exclude: ['node_modules/**/*']
         })
       ],
       define: {
