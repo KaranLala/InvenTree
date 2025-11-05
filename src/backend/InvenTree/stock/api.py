@@ -25,7 +25,7 @@ import InvenTree.permissions
 import stock.serializers as StockSerializers
 from build.models import Build
 from build.serializers import BuildSerializer
-from company.models import Company, SupplierPart
+from company.models import Company, ManufacturerPart, SupplierPart
 from company.serializers import CompanySerializer
 from data_exporter.mixins import DataExportViewMixin
 from generic.states.api import StatusView
@@ -52,6 +52,7 @@ from InvenTree.mixins import (
     OutputOptionsMixin,
     RetrieveAPI,
     RetrieveUpdateDestroyAPI,
+    SerializerContextMixin,
 )
 from order.models import PurchaseOrder, ReturnOrder, SalesOrder
 from order.serializers import (
@@ -373,17 +374,11 @@ class StockLocationFilter(FilterSet):
         return queryset
 
 
-class StockLocationMixin:
+class StockLocationMixin(SerializerContextMixin):
     """Mixin class for StockLocation API endpoints."""
 
     queryset = StockLocation.objects.all()
     serializer_class = StockSerializers.LocationSerializer
-
-    def get_serializer(self, *args, **kwargs):
-        """Set context before returning serializer."""
-        kwargs['context'] = self.get_serializer_context()
-
-        return super().get_serializer(*args, **kwargs)
 
     def get_queryset(self, *args, **kwargs):
         """Return annotated queryset for the StockLocationList endpoint."""
@@ -436,8 +431,12 @@ class StockLocationDetail(
 
     def destroy(self, request, *args, **kwargs):
         """Delete a Stock location instance via the API."""
-        delete_stock_items = str(request.data.get('delete_stock_items', 0)) == '1'
-        delete_sub_locations = str(request.data.get('delete_sub_locations', 0)) == '1'
+        delete_stock_items = InvenTree.helpers.str2bool(
+            request.data.get('delete_stock_items', False)
+        )
+        delete_sub_locations = InvenTree.helpers.str2bool(
+            request.data.get('delete_sub_locations', False)
+        )
 
         return super().destroy(
             request,
@@ -557,6 +556,12 @@ class StockFilter(FilterSet):
             Q(supplier_part__manufacturer_part__manufacturer__is_manufacturer=True)
             & Q(supplier_part__manufacturer_part__manufacturer=company)
         )
+
+    manufacturer_part = rest_filters.ModelChoiceFilter(
+        label=_('Manufacturer Part'),
+        queryset=ManufacturerPart.objects.all(),
+        field_name='supplier_part__manufacturer_part',
+    )
 
     supplier = rest_filters.ModelChoiceFilter(
         label=_('Supplier'),
@@ -1012,7 +1017,7 @@ class StockFilter(FilterSet):
         return queryset.filter(location__in=children)
 
 
-class StockApiMixin:
+class StockApiMixin(SerializerContextMixin):
     """Mixin class for StockItem API endpoints."""
 
     serializer_class = StockSerializers.StockItemSerializer
@@ -1032,14 +1037,22 @@ class StockApiMixin:
 
         return ctx
 
-    def get_serializer(self, *args, **kwargs):
-        """Set context before returning serializer."""
-        kwargs['context'] = self.get_serializer_context()
 
-        return super().get_serializer(*args, **kwargs)
+class StockOutputOptions(OutputConfiguration):
+    """Output options for StockItem serializers."""
+
+    OPTIONS = [
+        InvenTreeOutputOption('part_detail', default=True),
+        InvenTreeOutputOption('path_detail'),
+        InvenTreeOutputOption('supplier_part_detail'),
+        InvenTreeOutputOption('location_detail'),
+        InvenTreeOutputOption('tests'),
+    ]
 
 
-class StockList(DataExportViewMixin, StockApiMixin, ListCreateDestroyAPIView):
+class StockList(
+    DataExportViewMixin, StockApiMixin, OutputOptionsMixin, ListCreateDestroyAPIView
+):
     """API endpoint for list view of Stock objects.
 
     - GET: Return a list of all StockItem objects (with optional query filters)
@@ -1048,6 +1061,7 @@ class StockList(DataExportViewMixin, StockApiMixin, ListCreateDestroyAPIView):
     """
 
     filterset_class = StockFilter
+    output_options = StockOutputOptions
 
     def create(self, request, *args, **kwargs):
         """Create a new StockItem object via the API.
@@ -1276,17 +1290,23 @@ class StockList(DataExportViewMixin, StockApiMixin, ListCreateDestroyAPIView):
     search_fields = [
         'serial',
         'batch',
+        'location__name',
         'part__name',
         'part__IPN',
         'part__description',
-        'location__name',
+        'supplier_part__SKU',
+        'supplier_part__supplier__name',
+        'supplier_part__manufacturer_part__MPN',
+        'supplier_part__manufacturer_part__manufacturer__name',
         'tags__name',
         'tags__slug',
     ]
 
 
-class StockDetail(StockApiMixin, RetrieveUpdateDestroyAPI):
+class StockDetail(StockApiMixin, OutputOptionsMixin, RetrieveUpdateDestroyAPI):
     """API detail endpoint for a single StockItem instance."""
+
+    output_options = StockOutputOptions
 
 
 class StockItemSerialNumbers(RetrieveAPI):
@@ -1300,7 +1320,7 @@ class StockItemSerialNumbers(RetrieveAPI):
     serializer_class = StockSerializers.StockItemSerialNumbersSerializer
 
 
-class StockItemTestResultMixin:
+class StockItemTestResultMixin(SerializerContextMixin):
     """Mixin class for the StockItemTestResult API endpoints."""
 
     queryset = StockItemTestResult.objects.all()
@@ -1311,12 +1331,6 @@ class StockItemTestResultMixin:
         ctx = super().get_serializer_context()
         ctx['request'] = self.request
         return ctx
-
-    def get_serializer(self, *args, **kwargs):
-        """Set context before returning serializer."""
-        kwargs['context'] = self.get_serializer_context()
-
-        return super().get_serializer(*args, **kwargs)
 
 
 class StockItemTestResultOutputOptions(OutputConfiguration):
@@ -1470,7 +1484,9 @@ class StockTrackingOutputOptions(OutputConfiguration):
     ]
 
 
-class StockTrackingList(DataExportViewMixin, OutputOptionsMixin, ListAPI):
+class StockTrackingList(
+    SerializerContextMixin, DataExportViewMixin, OutputOptionsMixin, ListAPI
+):
     """API endpoint for list view of StockItemTracking objects.
 
     StockItemTracking objects are read-only
@@ -1482,12 +1498,6 @@ class StockTrackingList(DataExportViewMixin, OutputOptionsMixin, ListAPI):
     queryset = StockItemTracking.objects.all()
     serializer_class = StockSerializers.StockTrackingSerializer
     output_options = StockTrackingOutputOptions
-
-    def get_serializer(self, *args, **kwargs):
-        """Set context before returning serializer."""
-        kwargs['context'] = self.get_serializer_context()
-
-        return super().get_serializer(*args, **kwargs)
 
     def get_delta_model_map(self) -> dict:
         """Return a mapping of delta models to their respective models and serializers.

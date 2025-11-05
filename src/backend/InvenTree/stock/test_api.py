@@ -265,13 +265,9 @@ class StockLocationTest(StockAPITestCase):
 
     def test_output_options(self):
         """Test output options."""
-        url = reverse('api-location-detail', kwargs={'pk': 1})
-
-        response = self.get(url, {'path_detail': 'true'}, expected_code=200)
-        self.assertIn('path', response.data)
-
-        response = self.get(url, {'path_detail': 'false'}, expected_code=200)
-        self.assertNotIn('path', response.data)
+        self.run_output_test(
+            reverse('api-location-detail', kwargs={'pk': 1}), [('path_detail', 'path')]
+        )
 
     def test_stock_location_structural(self):
         """Test the effectiveness of structural stock locations.
@@ -1527,6 +1523,19 @@ class StockItemTest(StockAPITestCase):
         data = self.get(url).data
         self.assertEqual(data['purchase_price_currency'], 'NZD')
 
+    def test_output_options(self):
+        """Test the output options for StockItemt detail."""
+        self.run_output_test(
+            reverse('api-stock-detail', kwargs={'pk': 1}),
+            [
+                'part_detail',
+                ('path_detail', 'location_path'),
+                'supplier_part_detail',
+                'location_detail',
+                'tests',
+            ],
+        )
+
     def test_install(self):
         """Test that stock item can be installed into another item, via the API."""
         # Select the "parent" stock item
@@ -2193,19 +2202,10 @@ class StockTestResultTest(StockAPITestCase):
 
     def test_output_options(self):
         """Test output options for single item retrieval."""
-        url = reverse('api-stock-test-result-detail', kwargs={'pk': 1})
-
-        response = self.get(url, {'user_detail': 'true'}, expected_code=200)
-        self.assertIn('user_detail', response.data)
-
-        response = self.get(url, {'user_detail': 'false'}, expected_code=200)
-        self.assertNotIn('user_detail', response.data)
-
-        response = self.get(url, {'template_detail': 'true'}, expected_code=200)
-        self.assertIn('template_detail', response.data)
-
-        response = self.get(url, {'template_detail': 'false'}, expected_code=200)
-        self.assertNotIn('template_detail', response.data)
+        self.run_output_test(
+            reverse('api-stock-test-result-detail', kwargs={'pk': 1}),
+            ['user_detail', 'template_detail'],
+        )
 
 
 class StockTrackingTest(StockAPITestCase):
@@ -2304,22 +2304,12 @@ class StockTrackingTest(StockAPITestCase):
 
     def test_output_options(self):
         """Test output options."""
-        url = self.get_url()
-        response = self.client.get(
-            url, {'item_detail': True, 'user_detail': True, 'limit': 2}
+        self.run_output_test(
+            self.get_url(),
+            ['item_detail', 'user_detail'],
+            additional_params={'limit': 2},
+            assert_fnc=lambda x: x.data['results'][0],
         )
-
-        for item in response.data['results']:
-            self.assertIn('item_detail', item)
-            self.assertIn('user_detail', item)
-
-        response = self.client.get(
-            url, {'item_detail': False, 'user_detail': False, 'limit': 2}
-        )
-
-        for item in response.data['results']:
-            self.assertNotIn('item_detail', item)
-            self.assertNotIn('user_detail', item)
 
 
 class StockAssignTest(StockAPITestCase):
