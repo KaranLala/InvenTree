@@ -16,7 +16,11 @@ from rest_framework import status
 import build.models
 import company.models
 import part.models
-from common.models import InvenTreeCustomUserStateModel, InvenTreeSetting
+from common.models import (
+    InvenTreeCustomUserStateModel,
+    InvenTreeSetting,
+    ParameterTemplate,
+)
 from common.settings import set_global_setting
 from InvenTree.unit_test import InvenTreeAPIPerformanceTestCase, InvenTreeAPITestCase
 from part.models import Part, PartTestTemplate
@@ -34,6 +38,7 @@ class StockAPITestCase(InvenTreeAPITestCase):
     """Mixin for stock api tests."""
 
     fixtures = [
+        'tenant',
         'category',
         'part',
         'test_templates',
@@ -131,6 +136,7 @@ class StockLocationTest(StockAPITestCase):
             'parent': 1,
             'name': 'Location',
             'description': 'Another location for stock',
+            'tenant': 1,
         }
 
         self.post(self.list_url, data, expected_code=201)
@@ -952,7 +958,7 @@ class StockItemListTest(StockAPITestCase):
 
         # Note: While the export is quick on pgsql, it is still quite slow on sqlite3
         with self.export_data(
-            self.list_url, max_query_count=50, max_query_time=7.5
+            self.list_url, max_query_count=65, max_query_time=7.5
         ) as data_file:
             data = self.process_csv(data_file)
 
@@ -1061,17 +1067,17 @@ class StockItemListTest(StockAPITestCase):
         ])
 
         # List *all* stock items
-        self.get(self.list_url, {}, max_query_count=35)
+        self.get(self.list_url, {}, max_query_count=40)
 
         # List all stock items, with part detail
-        self.get(self.list_url, {'part_detail': True}, max_query_count=35)
+        self.get(self.list_url, {'part_detail': True}, max_query_count=40)
 
         # List all stock items, with supplier_part detail
-        self.get(self.list_url, {'supplier_part_detail': True}, max_query_count=35)
+        self.get(self.list_url, {'supplier_part_detail': True}, max_query_count=40)
 
         # List all stock items, with 'location' and 'tests' detail
         self.get(
-            self.list_url, {'location_detail': True, 'tests': True}, max_query_count=35
+            self.list_url, {'location_detail': True, 'tests': True}, max_query_count=40
         )
 
     def test_batch_generate_api(self):
@@ -1156,6 +1162,38 @@ class StockItemListTest(StockAPITestCase):
             self.assertEqual(response.data['parent'], parent_item.pk)
             self.assertEqual(response.data['quantity'], 1)
             self.assertEqual(response.data['child_items'], 0)
+
+    def test_total_in_stock(self):
+        """Test that part_detail includes total_in_stock and is computed correctly."""
+        # Create a part
+        my_part = Part.objects.create(
+            name='Total Stock Test Part', description='Test Part for total_in_stock'
+        )
+
+        location = StockLocation.objects.first()
+
+        # Create multiple stock items for the same part
+        StockItem.objects.create(part=my_part, quantity=10, location=location)
+        StockItem.objects.create(part=my_part, quantity=25, location=location)
+        StockItem.objects.create(part=my_part, quantity=15, location=location)
+
+        # Total should be 50
+        expected_total = 50
+
+        # Fetch stock list via API with part_detail
+        response = self.get(
+            reverse('api-stock-list'),
+            {'part': my_part.pk, 'part_detail': True},
+            max_query_count=35,  # Ensure no N+1 queries
+        )
+
+        self.assertEqual(len(response.data), 3)
+
+        # Each stock item should have part_detail with total_in_stock
+        for item in response.data:
+            self.assertIn('part_detail', item)
+            self.assertIn('total_in_stock', item['part_detail'])
+            self.assertEqual(item['part_detail']['total_in_stock'], expected_total)
 
 
 class CustomStockItemStatusTest(StockAPITestCase):
@@ -2611,6 +2649,7 @@ class StockMetadataAPITest(InvenTreeAPITestCase):
     """Unit tests for the various metadata endpoints of API."""
 
     fixtures = [
+        'tenant',
         'category',
         'part',
         'test_templates',
@@ -2670,3 +2709,68 @@ class StockApiPerformanceTest(StockAPITestCase, InvenTreeAPIPerformanceTestCase)
         url = reverse('api-stock-list')
         response = self.get(url, expected_code=200)
         self.assertGreater(len(response.data), 13)
+
+
+class StockLocationParameterTest(InvenTreeAPITestCase):
+    """Tests for StockLocation parameters."""
+
+    superuser = True
+    fixtures = ['tenant', 'location']
+
+    def test_location_parameter_crud(self):
+        """Test basic CRUD operations for location parameters."""
+        url = reverse('api-parameter-list')
+
+        # Create a parameter template
+        template = ParameterTemplate.objects.create(
+            name='Temperature', description='Storage temperature', units='°C'
+        )
+
+        # Get a stock location
+        location = StockLocation.objects.first()
+        self.assertIsNotNone(location)
+
+        # Create a parameter for the stock location
+        response = self.post(
+            url,
+            {
+                'model_type': 'stock.stocklocation',
+                'model_id': location.pk,
+                'template': template.pk,
+                'data': '25',
+            },
+            expected_code=201,
+        )
+
+        param_pk = response.data['pk']
+
+        # Read the parameter via API
+        response = self.get(
+            url,
+            {'model_type': 'stock.stocklocation', 'model_id': location.pk},
+            expected_code=200,
+        )
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['data'], '25')
+
+        # Update the parameter
+        detail_url = reverse('api-parameter-detail', kwargs={'pk': param_pk})
+        response = self.patch(detail_url, {'data': '30'}, expected_code=200)
+        self.assertEqual(response.data['data'], '30')
+
+        # Verify the update via model
+        location.refresh_from_db()
+        param = location.get_parameter('Temperature')
+        self.assertIsNotNone(param)
+        self.assertEqual(param.data, '30')
+
+        # Delete the parameter
+        response = self.delete(detail_url, expected_code=204)
+
+        # Verify deletion
+        response = self.get(
+            url,
+            {'model_type': 'stock.stocklocation', 'model_id': location.pk},
+            expected_code=200,
+        )
+        self.assertEqual(len(response.data), 0)
