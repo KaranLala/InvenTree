@@ -4,9 +4,11 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from functools import wraps
 from pathlib import Path
 from platform import python_version
@@ -357,13 +359,42 @@ def manage_py_path():
     return manage_py_dir().joinpath('manage.py')
 
 
+def debug_dir() -> Path:
+    """Return the local debug output directory."""
+    return local_dir().joinpath('debug')
+
+
+def timestamped_debug_log_path(prefix: str) -> Path:
+    """Return a timestamped log file path in the debug output directory."""
+    log_dir = debug_dir()
+    log_dir.mkdir(exist_ok=True)
+
+    timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    return log_dir.joinpath(f'{prefix}-{timestamp}.log')
+
+
+def append_log_header(log_path: Path, *lines: str):
+    """Append a short header to a log file."""
+    with log_path.open('a', encoding='utf-8') as log_file:
+        for line in lines:
+            log_file.write(f'{line}\n')
+        log_file.write('\n')
+
+
 # endregion
 
 if __name__ in ['__main__', 'tasks']:
     main()
 
 
-def run(c, cmd, path: Optional[Path] = None, pty=False, env=None):
+def run(
+    c,
+    cmd,
+    path: Optional[Path] = None,
+    pty=False,
+    env=None,
+    log_path: Optional[Path] = None,
+):
     """Runs a given command a given path.
 
     Args:
@@ -372,19 +403,27 @@ def run(c, cmd, path: Optional[Path] = None, pty=False, env=None):
         path: Path to run the command in.
         pty (bool, optional): Run an interactive session. Defaults to False.
         env (dict, optional): Environment variables to pass to the command. Defaults to None.
+        log_path (Path, optional): Path to append command output to. Defaults to None.
     """
     env = env or {}
     path = path or local_dir()
+    original_cmd = cmd
+
+    if log_path:
+        log_path.parent.mkdir(exist_ok=True)
+        quoted_log_path = shlex.quote(str(log_path))
+        logged_cmd = f'{cmd} 2>&1 | tee -a {quoted_log_path}'
+        cmd = f'bash -o pipefail -c {shlex.quote(logged_cmd)}'
 
     try:
         c.run(f'cd "{path}" && {cmd}', pty=pty, env=env)
     except UnexpectedExit as e:
-        error(f"ERROR: InvenTree command failed: '{cmd}'")
+        error(f"ERROR: InvenTree command failed: '{original_cmd}'")
         warning('- Refer to the error messages in the log above for more information')
         raise e
 
 
-def manage(c, cmd, pty: bool = False, env=None):
+def manage(c, cmd, pty: bool = False, env=None, log_path: Optional[Path] = None):
     """Runs a given command against django's "manage.py" script.
 
     Args:
@@ -392,8 +431,9 @@ def manage(c, cmd, pty: bool = False, env=None):
         cmd: Django command to run.
         pty (bool, optional): Run an interactive session. Defaults to False.
         env (dict, optional): Environment variables to pass to the command. Defaults to None.
+        log_path (Path, optional): Path to append command output to. Defaults to None.
     """
-    run(c, f'python3 manage.py {cmd}', manage_py_dir(), pty, env)
+    run(c, f'python3 manage.py {cmd}', manage_py_dir(), pty, env, log_path)
 
 
 def yarn(c, cmd):
@@ -1493,13 +1533,21 @@ def test(
         test --runtest=company.test_api
     will run tests in the company/test_api.py file.
     """
+    log_path = timestamped_debug_log_path('test')
+    append_log_header(
+        log_path,
+        f'InvenTree test run started: {datetime.now().isoformat(timespec="seconds")}',
+        f'Command: {" ".join(sys.argv)}',
+    )
+    info(f'Test output will be logged to {log_path}')
+
     # Run sanity check on the django install
     if check:
-        manage(c, 'check')
+        manage(c, 'check', log_path=log_path)
 
     if translations:
         try:
-            manage(c, 'compilemessages', pty=True)
+            manage(c, 'compilemessages', pty=True, log_path=log_path)
         except Exception:
             warning('Failed to compile translations')
 
@@ -1531,15 +1579,15 @@ def test(
 
     if coverage:
         # Run tests within coverage environment, and generate report
-        run(c, f'coverage run {manage_py_path()} {cmd}')
-        run(c, 'coverage xml -i')
+        run(c, f'coverage run {manage_py_path()} {cmd}', log_path=log_path)
+        run(c, 'coverage xml -i', log_path=log_path)
     elif pytest:
         # Use pytest to run the tests
         migrate(c)
-        run(c, f'pytest {manage_py_path().parent.parent} --codspeed')
+        run(c, f'pytest {manage_py_path().parent.parent} --codspeed', log_path=log_path)
     else:
         # Run simple test runner, without coverage
-        manage(c, cmd, pty=pty)
+        manage(c, cmd, pty=pty, log_path=log_path)
 
 
 @task(
