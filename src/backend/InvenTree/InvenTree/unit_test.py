@@ -429,8 +429,6 @@ class PluginRegistryMixin:
 
         assert registry.is_ready, 'Plugin registry is not ready'
 
-        registry.reload_plugins()
-
         InvenTreeSetting.build_default_values()
         super().setUpTestData()
 
@@ -448,28 +446,30 @@ class PluginRegistryMixin:
 
 class InvenTreeTestCase(ExchangeRateMixin, PluginRegistryMixin, UserMixin, TestCase):
     """Testcase with user setup build in."""
+
     @classmethod
     def setUpTestData(cls):
-        from tenant.models import Tenant
+        """Set up shared test data and activate English translations."""
         from django.utils import translation
 
         super().setUpTestData()
 
-        translation.activate("en")
+        translation.activate('en')
 
 
 class InvenTreeAPITestCase(
     ExchangeRateMixin, PluginRegistryMixin, TestQueryMixin, UserMixin, APITestCase
 ):
     """Base class for running InvenTree API tests."""
+
     @classmethod
     def setUpTestData(cls):
-        from tenant.models import Tenant
+        """Set up shared test data and activate English translations."""
         from django.utils import translation
 
         super().setUpTestData()
 
-        translation.activate("en")
+        translation.activate('en')
 
     def check_response(self, url, response, expected_code=None, msg=None):
         """Debug output for an unexpected response."""

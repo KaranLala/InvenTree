@@ -60,7 +60,7 @@ if TESTING:
     PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
 
     # Enable slow-test-runner
-    TEST_RUNNER = 'django_slowtests.testrunner.DiscoverSlowestTestsRunner'
+    TEST_RUNNER = 'InvenTree.test_runner.InvenTreeTestRunner'
     NUM_SLOW_TESTS = 25
 
 

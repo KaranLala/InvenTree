@@ -168,6 +168,22 @@ class PluginsRegistry:
         # Perform initial plugin discovery
         self.reload_plugins(full_reload=True, force_reload=True, collect=True)
 
+    def synchronize_database(self):
+        """Synchronize registry state with the active database.
+
+        This is used at lifecycle boundaries where the database behind the
+        configured connection has changed, such as after creating a test database.
+        """
+        self.errors = {}
+
+        if not self.is_ready:
+            self.set_ready()
+            return
+
+        self.reload_plugins(
+            full_reload=True, force_reload=True, collect=True, clear_errors=True
+        )
+
     @property
     def is_ready(self) -> bool:
         """Return True if the plugin registry is ready to be used."""
@@ -344,6 +360,7 @@ class PluginsRegistry:
             # If plugin has no config yet, treat it as inactive by default
             if config is None:
                 from plugin.models import PluginConfig
+
                 config = PluginConfig(key=plugin.slug)
 
             if active is not None and active != config.is_active():

@@ -213,6 +213,11 @@ class InvenTreePluginTests(TestCase):
 class RegistryTests(TestQueryMixin, PluginRegistryMixin, TestCase):
     """Tests for registry loading methods."""
 
+    def setUp(self):
+        """Restore the database-backed registry baseline before each mutation test."""
+        super().setUp()
+        registry.synchronize_database()
+
     def mockDir(self) -> str:
         """Returns path to mock dir."""
         return str(Path(__file__).parent.joinpath('mock').absolute())
