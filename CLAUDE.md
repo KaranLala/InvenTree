@@ -88,6 +88,9 @@ Tenant FKs exist on `StockLocation` and orders. Enforced invariants:
 - A stock location's tenant must match its parent location's tenant
 - Stock cannot be transferred between locations with different tenants
 - Sales order allocation checks that stock tenant matches the order tenant
+- Transfer orders operate within a single tenant: source/destination locations must
+  match the order tenant (and each other), and allocated stock must come from a
+  location of the order's tenant
 - A default tenant is created by migration `tenant/migrations/0002_create_default_tenant.py`
 
 Managed via the Tenant Management panel in the frontend Admin Center. Tenant delete permission is removed for all users.
@@ -106,3 +109,34 @@ Managed via the Tenant Management panel in the frontend Admin Center. Tenant del
 - Barcode generation is currently disabled (see commit `9aee58fcb`)
 - Company address line length limits were increased
 - Stock item tables show available stock instead of total stock
+
+## Upstream Merge: Migration Conflict Strategy
+
+Django identifies migrations by the full file name recorded in the `django_migrations`
+table; the numeric prefix is cosmetic. Duplicate numbers (e.g. two `0117_*.py` files in
+`stock`) are harmless. Follow these rules on every upstream sync:
+
+1. **Fork migrations in upstream apps are NEW files** at the next free number with a
+   descriptive name. Never edit or delete upstream migration files.
+   (Legacy exception, keep as-is: `order/0112_tax.py` replaced upstream's
+   `0112_alter_salesorderlineitem_part.py`, whose AlterField was folded into our
+   rewritten `0113`.)
+2. **Never rename/renumber a fork migration once applied anywhere** — Django would
+   treat the new name as unapplied and re-run it against deployed databases.
+3. **Never repoint an applied fork migration's `dependencies`** at newer upstream
+   migrations — existing databases would raise `InconsistentMigrationHistory`
+   (applied before its dependency).
+4. **After each upstream merge**, if an app has two leaf migrations (upstream chain +
+   fork migration sharing a parent), run
+   `python manage.py makemigrations --merge` (inside the dev container) and commit the
+   generated `NNNN_merge_*.py` files. This is the ONLY intervention needed — upstream
+   itself carries such merge migrations (e.g. `order/0061_merge_...`).
+5. Also run plain `makemigrations` afterwards: new upstream models inheriting fork
+   mixins (e.g. `TransferOrder` gaining the `tenant` FK) may need a fork migration.
+6. **Verify**: `manage.py makemigrations --check` (clean graph, no missing migrations),
+   then apply migrations on a fresh test DB (running the test suite does this) AND on a
+   copy of a production DB before deploying.
+
+## Upstream Policies
+
+Upstream InvenTree guidance (kept from upstream's CLAUDE.md): see [CONTRIBUTING.md](CONTRIBUTING.md) for codebase guidance. Security reports must follow [SECURITY.md](docs/docs/SECURITY.md) and the [threat model](docs/docs/concepts/threat_model.md). When contributing upstream: do not open a pull request without manual review by a human, and do not file AI-generated issues.

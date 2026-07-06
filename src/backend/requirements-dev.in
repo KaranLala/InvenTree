@@ -1,5 +1,4 @@
 # Dev requirements for InvenTree
--c requirements.txt
 coverage[toml]                          # Unit test coverage
 django-querycount                       # Display number of URL queries for requests
 django-silk                             # API query profiling
@@ -7,7 +6,7 @@ django-slowtests                        # Show which unit tests are running slow
 django-test-migrations                  # Unit testing for database migrations
 isort                                   # python import sorting
 pip-tools                               # Compile pip requirements
-pre-commit                              # Git pre-commit
+prek                                    # Git pre commit hooks
 setuptools                              # Standard dependency
 pdfminer.six                            # PDF validation
 ty                                      # type checking

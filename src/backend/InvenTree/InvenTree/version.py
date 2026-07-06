@@ -15,13 +15,14 @@ from datetime import timedelta as td
 from .api_version import INVENTREE_API_TEXT, INVENTREE_API_VERSION
 
 # InvenTree software version
-INVENTREE_SW_VERSION = '1.2.0 dev'
+INVENTREE_SW_VERSION = '1.4.0 dev'
 
 # Minimum supported Python version
 MIN_PYTHON_VERSION = (3, 11)
 
 logger = logging.getLogger('inventree')
 
+git_warning_txt = 'INVE-W3: Could not detect git information.'
 
 # Discover git
 try:
@@ -33,8 +34,19 @@ try:
         main_repo = Repo(pathlib.Path(__file__).parent.parent.parent.parent.parent)
         main_commit = main_repo[main_repo.head()]
     except NotGitRepository:
-        # If we are running in a docker container, the repo may not be available
-        logger.warning('INVE-W3: Could not detect git information.')
+        output = logger.warning
+
+        try:
+            from django.conf import settings
+
+            if settings.DOCKER:
+                output = logger.info
+        except Exception:
+            # We may not have access to settings at this point
+            pass
+
+        output(git_warning_txt)
+
         main_repo = None
         main_commit = None
 
@@ -43,6 +55,10 @@ try:
     except (KeyError, IndexError):
         logger.warning('INVE-W1: Current branch could not be detected.')
         main_branch = None
+
+    if main_repo is not None:
+        main_repo.close()
+        main_repo = None
 except ImportError:
     logger.warning(
         'INVE-W2: Dulwich module not found, git information will not be available.'
@@ -51,7 +67,7 @@ except ImportError:
     main_commit = None
     main_branch = None
 except Exception as exc:
-    logger.warning('INVE-W3: Could not detect git information.', exc_info=exc)
+    logger.warning(git_warning_txt, exc_info=exc)
     main_repo = None
     main_commit = None
     main_branch = None
@@ -277,8 +293,10 @@ def inventreeBranch():
         return ' '.join(branch.splitlines())
 
     if main_branch is None:
-        return None
-    return main_branch.decode('utf-8')
+        return None  # pragma: no cover - branch information may not be available in all environments
+    return main_branch.decode(
+        'utf-8'
+    )  # pragma: no cover - branch information may not be available in all environments
 
 
 def inventreeTarget():

@@ -1,4 +1,5 @@
 import { cancelEvent } from '@lib/functions/Events';
+import useTable from '@lib/hooks/UseTable';
 import {
   ApiEndpoints,
   type ApiFormFieldSet,
@@ -13,19 +14,19 @@ import {
 import type { TableFilter } from '@lib/types/Filters';
 import type { TableColumn } from '@lib/types/Tables';
 import { t } from '@lingui/core/macro';
-import { Group } from '@mantine/core';
+import { Divider, Group, Text } from '@mantine/core';
 import { useHover } from '@mantine/hooks';
 import { IconCirclePlus } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { type ReactNode, useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApi } from '../../contexts/ApiContext';
+import { formatDate } from '../../defaults/formatters';
 import { useParameterFields } from '../../forms/CommonForms';
 import {
   useCreateApiFormModal,
   useEditApiFormModal
 } from '../../hooks/UseForm';
-import { useTable } from '../../hooks/UseTable';
 import { useUserState } from '../../states/UserState';
 import { InvenTreeTable } from '../InvenTreeTable';
 import { TableHoverCard } from '../TableHoverCard';
@@ -72,11 +73,41 @@ function ParameterCell({
     parameter.data_numeric != parameter.data
   ) {
     const numeric = formatDecimal(parameter.data_numeric, { digits: 15 });
-    extra.push(`${numeric} [${template.units}]`);
+
+    extra.push(
+      <Group gap='xs' justify='space-between'>
+        <Text size='sm' fw='bold'>
+          {numeric}
+        </Text>
+        <Text size='xs'>[{template.units}]</Text>
+      </Group>
+    );
+  }
+
+  if (parameter?.updated) {
+    extra.push(
+      <Group gap='xs' justify='space-between'>
+        <Text size='sm' fw='bold'>{t`Last Updated`}</Text>
+        <Text size='xs'>{formatDate(parameter.updated)}</Text>
+      </Group>
+    );
+  }
+
+  if (parameter?.updated_by_detail?.username) {
+    extra.push(
+      <Group gap='xs' justify='space-between'>
+        <Text size='sm' fw='bold'>{t`Updated By`}</Text>
+        <Text size='xs'>{parameter.updated_by_detail.username}</Text>
+      </Group>
+    );
   }
 
   if (hovered && canEdit) {
-    extra.push(t`Click to edit`);
+    if (extra.length > 0) {
+      extra.push(<Divider />);
+    }
+
+    extra.push(<Text size='xs'>{t`Click to edit`}</Text>);
   }
 
   return (
@@ -88,6 +119,7 @@ function ParameterCell({
             extra={extra}
             icon={hovered && canEdit ? 'edit' : 'info'}
             title={template.name}
+            minWidth={250}
           />
         </Group>
       </Group>
@@ -101,12 +133,18 @@ function ParameterCell({
  */
 export default function ParametricDataTable({
   modelType,
+  modelId,
+  relatedModel,
+  relatedModelId,
   endpoint,
   queryParams,
   customFilters,
   customColumns
 }: {
   modelType: ModelType;
+  modelId?: number;
+  relatedModel?: string;
+  relatedModelId?: number;
   endpoint: ApiEndpoints | string;
   queryParams?: Record<string, any>;
   customFilters?: TableFilter[];
@@ -125,8 +163,12 @@ export default function ParametricDataTable({
         .get(apiUrl(ApiEndpoints.parameter_template_list), {
           params: {
             active: true,
+            ordering: 'name',
             for_model: modelType,
-            exists_for_model: modelType
+            exists_for_model: modelType,
+            exists_for_model_id: modelId ?? undefined,
+            exists_for_related_model: relatedModel ?? undefined,
+            exists_for_related_model_id: relatedModelId ?? undefined
           }
         })
         .then((response) => response.data);
@@ -134,7 +176,7 @@ export default function ParametricDataTable({
     refetchOnMount: true
   });
 
-  /* Store filters against selected part parameters.
+  /* Store filters against selected parameters.
    * These are stored in the format:
    * {
    *   parameter_1: {

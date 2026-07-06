@@ -1,6 +1,6 @@
 import { t } from '@lingui/core/macro';
 import { Group, Text } from '@mantine/core';
-import { type ReactNode, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { ActionButton } from '@lib/components/ActionButton';
@@ -10,6 +10,7 @@ import { ModelType } from '@lib/enums/ModelType';
 import { UserRoles } from '@lib/enums/Roles';
 import { apiUrl } from '@lib/functions/Api';
 import { getDetailUrl } from '@lib/functions/Navigation';
+import useTable from '@lib/hooks/UseTable';
 import type { TableFilter } from '@lib/types/Filters';
 import type { StockOperationProps } from '@lib/types/Forms';
 import type { TableColumn } from '@lib/types/Tables';
@@ -23,18 +24,21 @@ import { useStockFields } from '../../forms/StockForms';
 import { InvenTreeIcon } from '../../functions/icons';
 import { useCreateApiFormModal } from '../../hooks/UseForm';
 import { useStockAdjustActions } from '../../hooks/UseStockAdjustActions';
-import { useTable } from '../../hooks/UseTable';
 import { useGlobalSettingsState } from '../../states/SettingsStates';
 import { useUserState } from '../../states/UserState';
 import {
   DateColumn,
   DescriptionColumn,
+  IPNColumn,
   LocationColumn,
   PartColumn,
-  StatusColumn
+  StatusColumn,
+  StockColumn
 } from '../ColumnRenderers';
 import {
   BatchFilter,
+  CreatedAfterFilter,
+  CreatedBeforeFilter,
   HasBatchCodeFilter,
   InStockFilter,
   IncludeVariantsFilter,
@@ -44,10 +48,12 @@ import {
   SerialGTEFilter,
   SerialLTEFilter,
   StatusFilterOptions,
-  SupplierFilter
+  SupplierFilter,
+  TagsFilter,
+  UpdatedAfterFilter,
+  UpdatedBeforeFilter
 } from '../Filter';
 import { InvenTreeTable } from '../InvenTreeTable';
-import { TableHoverCard } from '../TableHoverCard';
 
 /**
  * Construct a list of columns for the stock item table
@@ -62,13 +68,10 @@ function stockItemTableColumns({
   return [
     PartColumn({
       accessor: 'part',
-      part: 'part_detail'
+      part: 'part_detail',
+      filter: ['active']
     }),
-    {
-      accessor: 'part_detail.IPN',
-      title: t`IPN`,
-      sortable: true
-    },
+    IPNColumn({}),
     {
       accessor: 'part_detail.revision',
       title: t`Revision`,
@@ -78,153 +81,19 @@ function stockItemTableColumns({
     DescriptionColumn({
       accessor: 'part_detail.description'
     }),
-    {
-      accessor: 'quantity',
-      ordering: 'stock',
-      sortable: true,
+    StockColumn({
+      accessor: '',
       title: t`Stock`,
-      render: (record: any) => {
-        // TODO: Push this out into a custom renderer
-        const quantity = record?.quantity ?? 0;
-        const allocated = record?.allocated ?? 0;
-        const available = quantity - allocated;
-        let text = formatDecimal(quantity);
-        const part = record?.part_detail ?? {};
-        const extra: ReactNode[] = [];
-        let color = undefined;
-
-        if (record.serial && quantity == 1) {
-          text = `# ${record.serial}`;
-        }
-
-        if (record.is_building) {
-          color = 'blue';
-          extra.push(
-            <Text
-              key='production'
-              size='sm'
-            >{t`This stock item is in production`}</Text>
-          );
-        } else if (record.sales_order) {
-          extra.push(
-            <Text
-              key='sales-order'
-              size='sm'
-            >{t`This stock item has been assigned to a sales order`}</Text>
-          );
-        } else if (record.customer) {
-          extra.push(
-            <Text
-              key='customer'
-              size='sm'
-            >{t`This stock item has been assigned to a customer`}</Text>
-          );
-        } else if (record.belongs_to) {
-          extra.push(
-            <Text
-              key='belongs-to'
-              size='sm'
-            >{t`This stock item is installed in another stock item`}</Text>
-          );
-        } else if (record.consumed_by) {
-          extra.push(
-            <Text
-              key='consumed-by'
-              size='sm'
-            >{t`This stock item has been consumed by a build order`}</Text>
-          );
-        } else if (!record.in_stock) {
-          extra.push(
-            <Text
-              key='unavailable'
-              size='sm'
-            >{t`This stock item is unavailable`}</Text>
-          );
-        }
-
-        if (record.expired) {
-          extra.push(
-            <Text
-              key='expired'
-              size='sm'
-            >{t`This stock item has expired`}</Text>
-          );
-        } else if (record.stale) {
-          extra.push(
-            <Text key='stale' size='sm'>{t`This stock item is stale`}</Text>
-          );
-        }
-
-        if (record.in_stock) {
-          if (allocated > 0) {
-            if (allocated >= quantity) {
-              color = 'orange';
-              extra.push(
-                <Text
-                  key='fully-allocated'
-                  size='sm'
-                >{t`This stock item is fully allocated`}</Text>
-              );
-            } else {
-              extra.push(
-                <Text
-                  key='partially-allocated'
-                  size='sm'
-                >{t`This stock item is partially allocated`}</Text>
-              );
-            }
-          }
-
-          if (available != quantity) {
-            if (available > 0) {
-              extra.push(
-                <Text key='available' size='sm' c='orange'>
-                  {`${t`Available`}: ${formatDecimal(available)}`}
-                </Text>
-              );
-            } else {
-              extra.push(
-                <Text
-                  key='no-stock'
-                  size='sm'
-                  c='red'
-                >{t`No stock available`}</Text>
-              );
-            }
-          }
-
-          if (quantity <= 0) {
-            extra.push(
-              <Text
-                key='depleted'
-                size='sm'
-              >{t`This stock item has been depleted`}</Text>
-            );
-          }
-        }
-
-        if (!record.in_stock) {
-          color = 'red';
-        }
-
-        return (
-          <TableHoverCard
-            value={
-              <Group gap='xs' justify='left' wrap='nowrap'>
-                <Text c={color}>{text}</Text>
-                {part.units && (
-                  <Text size='xs' c={color}>
-                    [{part.units}]
-                  </Text>
-                )}
-              </Group>
-            }
-            title={t`Stock Information`}
-            extra={extra}
-          />
-        );
-      }
-    },
+      sortable: true,
+      ordering: 'stock',
+      filter: [
+        'available',
+        'allocated',
+        'consumed',
+        'installed',
+        'sent_to_customer'
+      ]
+    }),
     {
       accessor: 'part_detail.unallocated_stock',
       title: t`Available Stock`,
@@ -244,7 +113,9 @@ function stockItemTableColumns({
     StatusColumn({ model: ModelType.stockitem }),
     {
       accessor: 'batch',
-      sortable: true
+      sortable: true,
+      copyable: true,
+      filter: ['has_batch_code', 'batch']
     },
     LocationColumn({
       hidden: !showLocation,
@@ -262,13 +133,15 @@ function stockItemTableColumns({
       accessor: 'SKU',
       title: t`Supplier Part`,
       sortable: true,
-      defaultVisible: false
+      defaultVisible: false,
+      copyable: true
     },
     {
       accessor: 'MPN',
       title: t`Manufacturer Part`,
       sortable: true,
-      defaultVisible: false
+      defaultVisible: false,
+      copyable: true
     },
     {
       accessor: 'purchase_price',
@@ -305,21 +178,29 @@ function stockItemTableColumns({
       sortable: true,
       defaultVisible: false
     },
-
+    DateColumn({
+      title: t`Created`,
+      accessor: 'creation_date',
+      sortable: true,
+      filter: ['created_before', 'created_after']
+    }),
+    DateColumn({
+      title: t`Last Updated`,
+      accessor: 'updated',
+      filter: ['updated_before', 'updated_after']
+    }),
     DateColumn({
       title: t`Expiry Date`,
       accessor: 'expiry_date',
       hidden: !useGlobalSettingsState.getState().isSet('STOCK_ENABLE_EXPIRY'),
-      defaultVisible: false
-    }),
-    DateColumn({
-      title: t`Last Updated`,
-      accessor: 'updated'
+      defaultVisible: false,
+      filter: ['stale', 'expiry_before', 'expiry_after']
     }),
     DateColumn({
       accessor: 'stocktake_date',
       title: t`Stocktake Date`,
-      sortable: true
+      sortable: true,
+      filter: ['has_stocktake', 'stocktake_before', 'stocktake_after']
     })
   ];
 }
@@ -435,18 +316,10 @@ function stockItemTableFilters({
       type: 'date',
       active: enableExpiry
     },
-    {
-      name: 'updated_before',
-      label: t`Updated Before`,
-      description: t`Show items updated before this date`,
-      type: 'date'
-    },
-    {
-      name: 'updated_after',
-      label: t`Updated After`,
-      description: t`Show items updated after this date`,
-      type: 'date'
-    },
+    UpdatedBeforeFilter(),
+    UpdatedAfterFilter(),
+    CreatedBeforeFilter(),
+    CreatedAfterFilter(),
     {
       name: 'stocktake_before',
       label: t`Stocktake Before`,
@@ -460,10 +333,16 @@ function stockItemTableFilters({
       type: 'date'
     },
     {
+      name: 'has_stocktake',
+      label: t`Has Stocktake Date`,
+      description: t`Show items which have a stocktake date`
+    },
+    {
       name: 'external',
       label: t`External Location`,
       description: t`Show items in an external location`
-    }
+    },
+    TagsFilter({ modelType: ModelType.stockitem })
   ];
 }
 
@@ -476,6 +355,8 @@ export function StockItemTable({
   showLocation = true,
   showPricing = true,
   allowReturn = false,
+  initialFilters,
+  defaultInStock = true,
   tableName = 'stockitems'
 }: Readonly<{
   params?: any;
@@ -483,9 +364,34 @@ export function StockItemTable({
   showLocation?: boolean;
   showPricing?: boolean;
   allowReturn?: boolean;
+  defaultInStock?: boolean | null;
+  initialFilters?: TableFilter[];
   tableName: string;
 }>) {
-  const table = useTable(tableName);
+  const initialStockFilters: TableFilter[] = useMemo(() => {
+    if (!!initialFilters) {
+      return initialFilters;
+    }
+
+    const filters: TableFilter[] = [];
+
+    // Optionally set the default "in_stock" filter
+    // Typically, we default to only displaying "in_stock" items,
+    // but this can be overridden by the caller if required
+    if (defaultInStock != undefined && defaultInStock != null) {
+      filters.push({
+        name: 'in_stock',
+        value: defaultInStock ? 'true' : 'false'
+      });
+    }
+
+    return filters;
+  }, [defaultInStock, initialFilters]);
+
+  const table = useTable(tableName, {
+    initialFilters: initialStockFilters
+  });
+
   const user = useUserState();
 
   const settings = useGlobalSettingsState();
@@ -552,7 +458,8 @@ export function StockItemTable({
       // Navigate to the first result
       navigate(getDetailUrl(ModelType.stockitem, response[0].pk));
     },
-    successMessage: t`Stock item serialized`
+    successMessage: t`Stock item created`,
+    keepOpenOption: true
   });
 
   const [partsToOrder, setPartsToOrder] = useState<any[]>([]);
@@ -563,7 +470,8 @@ export function StockItemTable({
 
   const stockAdjustActions = useStockAdjustActions({
     formProps: stockOperationProps,
-    return: allowReturn
+    return: allowReturn,
+    changeBatch: true
   });
 
   const tableActions = useMemo(() => {

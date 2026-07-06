@@ -12,6 +12,7 @@ import { ApiEndpoints } from '@lib/enums/ApiEndpoints';
 import { ModelType } from '@lib/enums/ModelType';
 import { UserRoles } from '@lib/enums/Roles';
 import { apiUrl } from '@lib/functions/Api';
+import useTable from '@lib/hooks/UseTable';
 import type { TableFilter } from '@lib/types/Filters';
 import type { TableColumn } from '@lib/types/Tables';
 import { useManufacturerPartFields } from '../../forms/CompanyForms';
@@ -20,14 +21,15 @@ import {
   useDeleteApiFormModal,
   useEditApiFormModal
 } from '../../hooks/UseForm';
-import { useTable } from '../../hooks/UseTable';
 import { useUserState } from '../../states/UserState';
 import {
   CompanyColumn,
   DescriptionColumn,
+  IPNColumn,
   LinkColumn,
   PartColumn
 } from '../ColumnRenderers';
+import { TagsFilter } from '../Filter';
 import { InvenTreeTable } from '../InvenTreeTable';
 
 /*
@@ -54,7 +56,29 @@ export function ManufacturerPartTable({
     return tId;
   }, [manufacturerId, partId]);
 
-  const table = useTable(tableId);
+  const initialFilters = useMemo(() => {
+    const filters: TableFilter[] = [];
+
+    if (!manufacturerId) {
+      filters.push({
+        name: 'manufacturer_active',
+        value: 'true'
+      });
+    }
+
+    if (!partId) {
+      filters.push({
+        name: 'part_active',
+        value: 'true'
+      });
+    }
+
+    return filters;
+  }, [manufacturerId, partId]);
+
+  const table = useTable(tableId, {
+    initialFilters: initialFilters
+  });
 
   const user = useUserState();
 
@@ -62,17 +86,14 @@ export function ManufacturerPartTable({
   const tableColumns: TableColumn[] = useMemo(() => {
     return [
       PartColumn({
-        switchable: !!partId
+        switchable: !!partId,
+        filter: 'part_active'
       }),
-      {
-        accessor: 'part_detail.IPN',
-        title: t`IPN`,
-        sortable: false,
-        switchable: true
-      },
+      IPNColumn({}),
       {
         accessor: 'manufacturer',
         sortable: true,
+        filter: 'manufacturer_active',
         render: (record: any) => (
           <CompanyColumn company={record?.manufacturer_detail} />
         )
@@ -80,7 +101,8 @@ export function ManufacturerPartTable({
       {
         accessor: 'MPN',
         title: t`MPN`,
-        sortable: true
+        sortable: true,
+        copyable: true
       },
       DescriptionColumn({}),
       LinkColumn({})
@@ -99,7 +121,8 @@ export function ManufacturerPartTable({
     initialData: {
       manufacturer: manufacturerId,
       part: partId
-    }
+    },
+    keepOpenOption: true
   });
 
   const editManufacturerPart = useEditApiFormModal({
@@ -141,7 +164,8 @@ export function ManufacturerPartTable({
         active: !manufacturerId,
         description: t`Show manufacturer parts for active manufacturers.`,
         type: 'boolean'
-      }
+      },
+      TagsFilter({ modelType: ModelType.manufacturerpart })
     ];
   }, [manufacturerId]);
 

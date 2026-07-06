@@ -12,12 +12,14 @@ class RuleSetEnum(StringEnum):
     ADMIN = 'admin'
     PART_CATEGORY = 'part_category'
     PART = 'part'
+    BOM = 'bom'
     STOCK_LOCATION = 'stock_location'
     STOCK = 'stock'
     BUILD = 'build'
     PURCHASE_ORDER = 'purchase_order'
     SALES_ORDER = 'sales_order'
     RETURN_ORDER = 'return_order'
+    TRANSFER_ORDER = 'transfer_order'
 
 
 # This is a list of all the ruleset choices available in the system.
@@ -26,12 +28,14 @@ RULESET_CHOICES = [
     (RuleSetEnum.ADMIN, _('Admin')),
     (RuleSetEnum.PART_CATEGORY, _('Part Categories')),
     (RuleSetEnum.PART, _('Parts')),
+    (RuleSetEnum.BOM, _('Bills of Material')),
     (RuleSetEnum.STOCK_LOCATION, _('Stock Locations')),
     (RuleSetEnum.STOCK, _('Stock Items')),
     (RuleSetEnum.BUILD, _('Build Orders')),
     (RuleSetEnum.PURCHASE_ORDER, _('Purchase Orders')),
     (RuleSetEnum.SALES_ORDER, _('Sales Orders')),
     (RuleSetEnum.RETURN_ORDER, _('Return Orders')),
+    (RuleSetEnum.TRANSFER_ORDER, _('Transfer Orders')),
 ]
 
 # Ruleset names available in the system.
@@ -74,6 +78,7 @@ def get_ruleset_models() -> dict:
             'oauth2_provider_idtoken',
             'oauth2_provider_accesstoken',
             'oauth2_provider_refreshtoken',
+            'oauth2_provider_devicegrant',
             # Plugins
             'plugin_pluginconfig',
             'plugin_pluginsetting',
@@ -95,6 +100,18 @@ def get_ruleset_models() -> dict:
             'tenant_tenant',
             'tax_taxconfiguration',
         ],
+        RuleSetEnum.BOM: ['part_bomitem', 'part_bomitemsubstitute'],
+        RuleSetEnum.BUILD: [
+            'part_part',
+            'part_partcategory',
+            'part_bomitem',
+            'part_bomitemsubstitute',
+            'build_build',
+            'build_builditem',
+            'build_buildline',
+            'stock_stockitem',
+            'stock_stocklocation',
+        ],
         RuleSetEnum.PART_CATEGORY: [
             'part_partcategory',
             'part_partcategoryparametertemplate',
@@ -103,8 +120,6 @@ def get_ruleset_models() -> dict:
         RuleSetEnum.PART: [
             'part_part',
             'part_partpricing',
-            'part_bomitem',
-            'part_bomitemsubstitute',
             'part_partsellpricebreak',
             'part_partinternalpricebreak',
             'part_parttesttemplate',
@@ -120,17 +135,6 @@ def get_ruleset_models() -> dict:
             'stock_stockitem',
             'stock_stockitemtracking',
             'stock_stockitemtestresult',
-        ],
-        RuleSetEnum.BUILD: [
-            'part_part',
-            'part_partcategory',
-            'part_bomitem',
-            'part_bomitemsubstitute',
-            'build_build',
-            'build_builditem',
-            'build_buildline',
-            'stock_stockitem',
-            'stock_stocklocation',
         ],
         RuleSetEnum.PURCHASE_ORDER: [
             'company_company',
@@ -160,6 +164,11 @@ def get_ruleset_models() -> dict:
             'order_returnorder',
             'order_returnorderlineitem',
             'order_returnorderextraline',
+        ],
+        RuleSetEnum.TRANSFER_ORDER: [
+            'order_transferorder',
+            'order_transferorderallocation',
+            'order_transferorderlineitem',
         ],
     }
 
