@@ -1902,12 +1902,8 @@ class StockTransferSerializer(StockAdjustmentSerializer):
                     if field_value := item.get(field_name, None):
                         kwargs[field_name] = field_value
 
-                stock_item.move(
-                    location, notes, request.user, quantity=quantity, **kwargs
-                )
-
                 moved_success = stock_item.move(
-                    location=location, quantity=quantity, user=request.user, notes=''
+                    location, notes, request.user, quantity=quantity, **kwargs
                 )
 
                 if not moved_success:

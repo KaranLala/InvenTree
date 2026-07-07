@@ -2367,6 +2367,36 @@ class StocktakeTest(StockAPITestCase):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
+    def test_transfer_partial(self):
+        """Test that a partial transfer moves exactly the requested quantity, once."""
+        stock_item = StockItem.objects.get(pk=1234)
+        part = stock_item.part
+        initial_quantity = stock_item.quantity
+        n_items = StockItem.objects.filter(part=part).count()
+        n_at_destination = StockItem.objects.filter(part=part, location=1).count()
+
+        data = {
+            'items': [{'pk': 1234, 'quantity': 100}],
+            'location': 1,
+            'notes': 'Partial transfer',
+        }
+
+        url = reverse('api-stock-transfer')
+
+        self.post(url, data, expected_code=201)
+
+        # Source item is reduced by exactly the requested quantity, and not moved
+        stock_item.refresh_from_db()
+        self.assertEqual(stock_item.quantity, initial_quantity - 100)
+        self.assertEqual(stock_item.location.pk, 5)
+
+        # Exactly one new stock item is created, at the destination
+        self.assertEqual(StockItem.objects.filter(part=part).count(), n_items + 1)
+
+        new_items = StockItem.objects.filter(part=part, location=1).exclude(pk=1234)
+        self.assertEqual(new_items.count(), n_at_destination + 1)
+        self.assertEqual(new_items.latest('pk').quantity, 100)
+
     def test_transfer_cross_tenant_validation(self):
         """Test that stock transfers between different tenants are prevented."""
         from tenant.models import Tenant
@@ -2417,6 +2447,8 @@ class StocktakeTest(StockAPITestCase):
             description='Another location for tenant 1',
         )
 
+        # Transfer the full quantity, so the item itself is moved (not split)
+        data['items'] = [{'pk': stock_item.pk, 'quantity': 10}]
         data['location'] = location3.pk
 
         # This should succeed
@@ -2425,6 +2457,7 @@ class StocktakeTest(StockAPITestCase):
         # Verify the stock item was moved
         stock_item.refresh_from_db()
         self.assertEqual(stock_item.location, location3)
+        self.assertEqual(stock_item.quantity, 10)
 
     def test_count_with_location(self):
         """Test that the stock count endpoint correctly handles the optional location field."""
