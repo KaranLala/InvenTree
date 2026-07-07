@@ -345,7 +345,7 @@ function LineRow({
 }
 
 /** Click-to-edit numeric cell: Enter/blur commits, Esc reverts. */
-function EditableNumberCell({
+export function EditableNumberCell({
   value,
   editable,
   min,
