@@ -125,6 +125,20 @@ export const NotFound = Loadable(
   lazy(() => import('./components/errors/NotFound'))
 );
 
+// FZ app (streamlined branch-scoped UI)
+export const FzLayout = Loadable(
+  lazy(() => import('./fz/FzLayout')),
+  true,
+  true
+);
+export const FzSalesOrderList = Loadable(
+  lazy(() => import('./fz/pages/so/FzSalesOrderList'))
+);
+export const FzPurchaseOrderList = Loadable(
+  lazy(() => import('./fz/pages/po/FzPurchaseOrderList'))
+);
+export const FzStock = Loadable(lazy(() => import('./fz/pages/stock/FzStock')));
+
 // Auth
 export const Login = Loadable(lazy(() => import('./pages/Auth/Login')));
 export const LoggedIn = Loadable(
@@ -153,8 +167,14 @@ export const VerifyEmail = Loadable(
 export const routes = (
   <Routes>
     <Route path='*' element={<NotFound />} errorElement={<ErrorPage />} />
+    <Route path='/b' element={<FzLayout />} errorElement={<ErrorPage />}>
+      <Route index element={<Navigate to='so/' replace />} />
+      <Route path='so/' element={<FzSalesOrderList />} />
+      <Route path='po/' element={<FzPurchaseOrderList />} />
+      <Route path='stock/' element={<FzStock />} />
+    </Route>
     <Route path='/' element={<LayoutComponent />} errorElement={<ErrorPage />}>
-      <Route index element={<Home />} />,
+      <Route index element={<Navigate to='/b/' replace />} />,
       <Route path='home/' element={<Home />} />,
       <Route path='notifications/*' element={<Notifications />} />,
       <Route path='scan/' element={<Scan />} />,

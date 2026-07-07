@@ -11,7 +11,12 @@ import {
   UnstyledButton
 } from '@mantine/core';
 import { useDisclosure, useDocumentVisibility } from '@mantine/hooks';
-import { IconBell, IconSearch, IconUserBolt } from '@tabler/icons-react';
+import {
+  IconBell,
+  IconBuildingStore,
+  IconSearch,
+  IconUserBolt
+} from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useMatch, useNavigate } from 'react-router-dom';
@@ -46,6 +51,7 @@ import { NotificationDrawer } from './NotificationDrawer';
 import { SearchDrawer } from './SearchDrawer';
 
 export function Header() {
+  const navigate = useNavigate();
   const [setNavigationOpen, navigationOpen] = useLocalState(
     useShallow((state) => [state.setNavigationOpen, state.navigationOpen])
   );
@@ -188,6 +194,15 @@ export function Header() {
             </Text>
           )}
           <Group>
+            <Tooltip position='bottom-end' label={t`Branch App`}>
+              <ActionIcon
+                onClick={() => navigate('/b/')}
+                variant='transparent'
+                aria-label='open-branch-app'
+              >
+                <IconBuildingStore />
+              </ActionIcon>
+            </Tooltip>
             <Tooltip position='bottom-end' label={t`Search`}>
               <ActionIcon
                 onClick={openSearchDrawer}
