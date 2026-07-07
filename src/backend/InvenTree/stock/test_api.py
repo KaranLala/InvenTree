@@ -551,6 +551,37 @@ class StockItemListTest(StockAPITestCase):
         for ordering in ['part', 'location', 'stock', 'status', 'IPN', 'MPN', 'SKU']:
             self.run_ordering_test(self.list_url, ordering)
 
+    def test_tenant_filter(self):
+        """Test filtering stock items by the tenant (branch) of their location."""
+        from tenant.models import Tenant
+
+        part = Part.objects.first()
+
+        tenant1 = Tenant.objects.create(name='Branch A', code='BA')
+        tenant2 = Tenant.objects.create(name='Branch B', code='BB')
+
+        location1 = StockLocation.objects.create(
+            name='Branch A location', tenant=tenant1
+        )
+        location2 = StockLocation.objects.create(
+            name='Branch B location', tenant=tenant2
+        )
+
+        item1 = StockItem.objects.create(part=part, location=location1, quantity=10)
+        item2 = StockItem.objects.create(part=part, location=location2, quantity=10)
+        item3 = StockItem.objects.create(part=part, location=None, quantity=10)
+
+        result_pks = [r['pk'] for r in self.get_stock(tenant=tenant1.pk)]
+        self.assertIn(item1.pk, result_pks)
+        self.assertNotIn(item2.pk, result_pks)
+
+        # Items without a location belong to no branch and are excluded
+        self.assertNotIn(item3.pk, result_pks)
+
+        result_pks = [r['pk'] for r in self.get_stock(tenant=tenant2.pk)]
+        self.assertIn(item2.pk, result_pks)
+        self.assertNotIn(item1.pk, result_pks)
+
     def test_creation_date_filter_and_ordering(self):
         """Test created_before / created_after filters and ordering by creation_date."""
         import datetime

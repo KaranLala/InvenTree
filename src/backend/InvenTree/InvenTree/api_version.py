@@ -1,10 +1,13 @@
 """InvenTree API version information."""
 
 # InvenTree API version
-INVENTREE_API_VERSION = 511
+INVENTREE_API_VERSION = 512
 """Increment this API version number whenever there is a significant change to the API that any clients need to know about."""
 
 INVENTREE_API_TEXT = """
+
+v512 -> 2026-07-07 : (fork)
+    - Adds 'tenant' filter to the StockItem list API (filters by the tenant of the stock item location)
 
 v511 -> 2026-06-19 : https://github.com/inventree/InvenTree/pull/12204
     - Adds new filtering options to PartCategoryTree and StockLocationTree API endpoints
