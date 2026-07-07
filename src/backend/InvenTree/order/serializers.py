@@ -51,8 +51,26 @@ from order.status_codes import (
 from part.serializers import PartBriefSerializer
 from stock.status_codes import StockStatus
 from tax.models import TaxConfiguration
+from tenant.models import Tenant
 from tenant.serializers import TenantSerializerMixin
 from users.serializers import OwnerSerializer, UserSerializer
+
+
+class OrderTenantSerializerMixin(TenantSerializerMixin):
+    """Tenant mixin for order serializers.
+
+    Unlike the default mixin, the tenant field is optional at the API level:
+    when omitted, the order serializer auto-assigns a tenant (see ``validate``
+    and ``create``), so imports and programmatic order creation keep working
+    without an explicit tenant. The frontend still marks the field as required.
+    """
+
+    tenant = serializers.PrimaryKeyRelatedField(
+        queryset=Tenant.objects.all(),
+        required=False,
+        label=_('Tenant'),
+        help_text=_('Tenant this order belongs to'),
+    )
 
 
 class TotalPriceMixin(serializers.Serializer):
@@ -339,7 +357,7 @@ class AbstractOrderSerializer(
             'completed_lines',
             'link',
             'project_code',
-            #'tenant',
+            'tenant',
             'tenant_detail',
             'reference',
             'responsible',
@@ -511,7 +529,7 @@ class AbstractExtraLineMeta:
 class PurchaseOrderSerializer(
     NotesFieldMixin,
     TotalPriceMixin,
-    TenantSerializerMixin,
+    OrderTenantSerializerMixin,
     InvenTreeCustomStatusSerializerMixin,
     AbstractOrderSerializer,
     InvenTreeModelSerializer,
@@ -1202,7 +1220,7 @@ class SalesOrderSerializer(
     NotesFieldMixin,
     TotalPriceMixin,
     TaxMixin,
-    TenantSerializerMixin,
+    OrderTenantSerializerMixin,
     InvenTreeCustomStatusSerializerMixin,
     AbstractOrderSerializer,
     InvenTreeTaggitSerializer,
@@ -2294,7 +2312,7 @@ class SalesOrderExtraLineSerializer(
 class ReturnOrderSerializer(
     NotesFieldMixin,
     TaxMixin,
-    TenantSerializerMixin,
+    OrderTenantSerializerMixin,
     InvenTreeCustomStatusSerializerMixin,
     AbstractOrderSerializer,
     TotalPriceMixin,
@@ -2589,7 +2607,7 @@ class ReturnOrderExtraLineSerializer(
 @register_importer()
 class TransferOrderSerializer(
     NotesFieldMixin,
-    TenantSerializerMixin,
+    OrderTenantSerializerMixin,
     InvenTreeCustomStatusSerializerMixin,
     AbstractOrderSerializer,
     InvenTreeModelSerializer,

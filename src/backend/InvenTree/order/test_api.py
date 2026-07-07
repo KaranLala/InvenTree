@@ -122,6 +122,15 @@ class PurchaseOrderTest(OrderTest):
             {'type': 'related field', 'required': True, 'api_url': '/api/company/'},
         )
 
+        # Checks for the fork-specific 'tenant' field (must be exposed for the
+        # frontend order form to render the tenant selector). Regression test
+        # for the field being omitted from the serializer 'fields' list.
+        check_options(
+            post,
+            'tenant',
+            {'type': 'related field', 'read_only': False, 'label': 'Tenant'},
+        )
+
     def test_po_list(self):
         """Test the PurchaseOrder list API endpoint."""
         # List *ALL* PurchaseOrder items
@@ -1563,6 +1572,24 @@ class SalesOrderTest(OrderTest):
 
     LIST_URL = reverse('api-so-list')
 
+    def test_so_options(self):
+        """Test the SalesOrder OPTIONS endpoint.
+
+        Regression test: the fork-specific 'tenant' field must be exposed in
+        the POST actions so the frontend order form can render the tenant
+        selector (previously it was omitted from the serializer 'fields' list,
+        which surfaced as "Invalid field type for field 'tenant'" in the UI).
+        """
+        self.assignRole('sales_order.add')
+
+        post = self.options(self.LIST_URL, expected_code=200).data['actions']['POST']
+
+        self.assertIn('tenant', post)
+        tenant = post['tenant']
+        self.assertEqual(tenant['type'], 'related field')
+        self.assertFalse(tenant['read_only'])
+        self.assertEqual(tenant['label'], 'Tenant')
+
     def test_so_list(self):
         """Test the SalesOrder list API endpoint."""
         # All orders
@@ -2711,6 +2738,13 @@ class ReturnOrderTests(InvenTreeAPITestCase):
         self.assertEqual(reference['help_text'], 'Return Order reference')
         self.assertEqual(reference['required'], True)
         self.assertEqual(reference['type'], 'string')
+
+        # The fork-specific 'tenant' field must be exposed for the frontend
+        # order form to render the tenant selector.
+        tenant = post['tenant']
+        self.assertEqual(tenant['type'], 'related field')
+        self.assertFalse(tenant['read_only'])
+        self.assertEqual(tenant['label'], 'Tenant')
 
     def test_project_code(self):
         """Test the 'project_code' serializer field."""
