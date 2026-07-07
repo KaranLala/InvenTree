@@ -23,7 +23,7 @@ class TenantFilterMixin(FilterSet):
     """
 
     tenant = rest_filters.ModelChoiceFilter(
-        queryset=Tenant.objects.all(), field_name='tenant', label=_('Tenant')
+        queryset=Tenant.objects.all(), field_name='tenant', label=_('Branch')
     )
 
 

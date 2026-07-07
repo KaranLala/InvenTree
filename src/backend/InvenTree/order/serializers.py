@@ -68,8 +68,8 @@ class OrderTenantSerializerMixin(TenantSerializerMixin):
     tenant = serializers.PrimaryKeyRelatedField(
         queryset=Tenant.objects.all(),
         required=False,
-        label=_('Tenant'),
-        help_text=_('Tenant this order belongs to'),
+        label=_('Branch'),
+        help_text=_('Branch this order belongs to'),
     )
 
 
