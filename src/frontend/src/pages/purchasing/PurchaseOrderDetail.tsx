@@ -262,7 +262,7 @@ export default function PurchaseOrderDetail() {
       {
         type: 'text',
         name: 'tenant_detail.name',
-        label: t`Tenant`,
+        label: t`Branch`,
         icon: 'sitemap',
         copy: true,
         hidden: !order.tenant

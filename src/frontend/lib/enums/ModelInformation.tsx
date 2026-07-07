@@ -321,8 +321,8 @@ export const ModelInformationDict: ModelDict = {
     icon: 'exclamation'
   },
   tenant: {
-    label: () => t`Tenant`,
-    label_multiple: () => t`Tenants`,
+    label: () => t`Branch`,
+    label_multiple: () => t`Branches`,
     api_endpoint: ApiEndpoints.tenant_list,
     url_detail: '/tenant/:pk/',
     icon: 'building'

@@ -67,7 +67,7 @@ export default function TenantTable() {
 
   const newTenant = useCreateApiFormModal({
     url: ApiEndpoints.tenant_list,
-    title: t`Add Tenant`,
+    title: t`Add Branch`,
     fields: tenantFields(),
     table: table
   });
@@ -79,7 +79,7 @@ export default function TenantTable() {
   const editTenant = useEditApiFormModal({
     url: ApiEndpoints.tenant_list,
     pk: selectedTenant,
-    title: t`Edit Tenant`,
+    title: t`Edit Branch`,
     fields: tenantFields(),
     table: table
   });
@@ -87,7 +87,7 @@ export default function TenantTable() {
   const deleteTenant = useDeleteApiFormModal({
     url: ApiEndpoints.tenant_list,
     pk: selectedTenant,
-    title: t`Delete Tenant`,
+    title: t`Delete Branch`,
     table: table
   });
 
@@ -118,7 +118,7 @@ export default function TenantTable() {
       <AddItemButton
         key='add'
         onClick={() => newTenant.open()}
-        tooltip={t`Add tenant`}
+        tooltip={t`Add branch`}
         hidden={!user.hasAddRole(UserRoles.admin)}
       />
     ];
