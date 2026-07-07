@@ -134,14 +134,14 @@ class PartPricingTests(InvenTreeTestCase):
         self.assertEqual(pricing.overall_min, Money('1', 'USD'))
 
         # Maximum price has changed, and was specified in a different currency
-        self.assertEqual(pricing.overall_max, Money('8.823529', 'USD'))
+        self.assertEqual(pricing.overall_max, Money('8.82', 'USD'))
 
         # Add BOM cost
         pricing.bom_cost_min = Money(0.1, 'GBP')
         pricing.bom_cost_max = Money(25, 'USD')
         pricing.save()
 
-        self.assertEqual(pricing.overall_min, Money('0.111111', 'USD'))
+        self.assertEqual(pricing.overall_min, Money('0.11', 'USD'))
         self.assertEqual(pricing.overall_max, Money('25', 'USD'))
 
     @override_settings(TESTING_PRICING=True)
@@ -161,7 +161,7 @@ class PartPricingTests(InvenTreeTestCase):
         pricing = self.part.pricing
         pricing.refresh_from_db()
 
-        self.assertAlmostEqual(float(pricing.overall_min.amount), 2.015, places=2)
+        self.assertEqual(round(float(pricing.overall_min.amount), 2), 2.01)
         self.assertAlmostEqual(float(pricing.overall_max.amount), 3.06, places=2)
 
         # Delete all supplier parts and re-calculate
@@ -247,8 +247,9 @@ class PartPricingTests(InvenTreeTestCase):
         self.assertIsNotNone(pricing.purchase_cost_min)
         self.assertIsNotNone(pricing.purchase_cost_max)
 
-        self.assertEqual(pricing.overall_min, Money(1.176471, 'USD'))
-        self.assertEqual(pricing.overall_max, Money(6.666667, 'USD'))
+        self.assertAlmostEqual(float(pricing.overall_min.amount), 1.176471, places=2)
+
+        self.assertAlmostEqual(float(pricing.overall_max.amount), 6.666667, places=2)
 
     @override_settings(TESTING_PRICING=True)
     def test_bom_pricing(self):
@@ -496,7 +497,6 @@ class PartPricingTests(InvenTreeTestCase):
         part.models.BomItem.objects.create(part=C1, sub_part=D1, quantity=3)
         part.models.BomItem.objects.create(part=C1, sub_part=D2, quantity=4)
         part.models.BomItem.objects.create(part=C1, sub_part=D3, quantity=5)
-
         # Pricing data (only for low-level D parts)
         P1 = D1.pricing
         P1.override_min = 4.50

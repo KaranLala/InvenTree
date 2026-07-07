@@ -24,6 +24,7 @@ from error_report.models import Error
 from mptt.exceptions import InvalidMove
 from mptt.models import MPTTModel, TreeForeignKey
 from stdimage.models import StdImageField
+from taggit.managers import TaggableManager
 
 import common.settings
 import InvenTree.exceptions
@@ -92,9 +93,22 @@ class PluginValidationMixin(DiffMixin):
     Any model class which inherits from this mixin will be exposed to the plugin validation system.
     """
 
+    def should_plugin_validate(self):
+        """Return True if this model instance should be validated by plugins.
+
+        The default implementation returns True, but this can be overridden in the implementing class if required.
+        """
+        from InvenTree.ready import isReadOnlyCommand
+
+        # Prevent plugin validation when importing or exporting data
+        return not isReadOnlyCommand()
+
     def run_plugin_validation(self):
         """Throw this model against the plugin validation interface."""
         from plugin import PluginMixinEnum, registry
+
+        if not self.should_plugin_validate():
+            return
 
         deltas = self.get_field_deltas()
 
@@ -139,15 +153,16 @@ class PluginValidationMixin(DiffMixin):
         from InvenTree.exceptions import log_error
         from plugin import PluginMixinEnum, registry
 
-        for plugin in registry.with_mixin(PluginMixinEnum.VALIDATION):
-            try:
-                plugin.validate_model_deletion(self)
-            except ValidationError as e:
-                # Plugin might raise a ValidationError to prevent deletion
-                raise e
-            except Exception:
-                log_error('validate_model_deletion', plugin=plugin.slug)
-                continue
+        if self.should_plugin_validate():
+            for plugin in registry.with_mixin(PluginMixinEnum.VALIDATION):
+                try:
+                    plugin.validate_model_deletion(self)
+                except ValidationError as e:
+                    # Plugin might raise a ValidationError to prevent deletion
+                    raise e
+                except Exception:
+                    log_error('validate_model_deletion', plugin=plugin.slug)
+                    continue
 
         super().delete(*args, **kwargs)
 
@@ -553,7 +568,7 @@ class InvenTreeParameterMixin(InvenTreePermissionCheckMixin, models.Model):
             if 'parameters_list' in cache:
                 return cache['parameters_list']
 
-        return self.parameters_list.all()
+        return self.parameters_list.all().prefetch_related('template')
 
     def delete(self, *args, **kwargs):
         """Handle the deletion of a model instance.
@@ -594,7 +609,7 @@ class InvenTreeParameterMixin(InvenTreePermissionCheckMixin, models.Model):
             parameters.append(parameter)
 
         if len(parameters) > 0:
-            common.models.Parameter.objects.bulk_create(parameters)
+            common.models.Parameter.objects.bulk_create(parameters, batch_size=250)
 
     def get_parameter(self, name: str):
         """Return a Parameter instance for the given parameter name.
@@ -610,7 +625,8 @@ class InvenTreeParameterMixin(InvenTreePermissionCheckMixin, models.Model):
     def get_parameters(self) -> QuerySet:
         """Return all Parameter instances for this model."""
         return (
-            self.parameters_list.all()
+            self.parameters_list
+            .all()
             .prefetch_related('template', 'model_type')
             .order_by('template__name')
         )
@@ -660,7 +676,9 @@ class InvenTreeAttachmentMixin(InvenTreePermissionCheckMixin):
 
         Before deleting the model instance, delete any associated attachments.
         """
-        self.attachments.all().delete()
+        for attachment in list(self.attachments.all()):
+            attachment.delete()
+
         super().delete(*args, **kwargs)
 
     @property
@@ -752,7 +770,8 @@ class InvenTreeTree(ContentTypeMixin, MPTTModel):
             for child in self.get_children():
                 # Store a flattened list of node IDs for each of the lower trees
                 nodes = list(
-                    child.get_descendants(include_self=True)
+                    child
+                    .get_descendants(include_self=True)
                     .values_list('pk', flat=True)
                     .distinct()
                 )
@@ -1232,6 +1251,25 @@ class InvenTreeNotesMixin(models.Model):
     )
 
 
+class InvenTreeTagsMixin(models.Model):
+    """A mixin class for adding tag functionality to a model class.
+
+    The following fields are added to any model which implements this mixin:
+
+    - tags : A text field for storing comma-separated tags
+    """
+
+    class Meta:
+        """Metaclass options for this mixin.
+
+        Note: abstract must be true, as this is only a mixin, not a separate table
+        """
+
+        abstract = True
+
+    tags = TaggableManager(blank=True)
+
+
 class InvenTreeBarcodeMixin(models.Model):
     """A mixin class for adding barcode functionality to a model class.
 
@@ -1408,32 +1446,22 @@ def after_failed_task(sender, instance: Task, created: bool, **kwargs):
     """Callback when a new task failure log is generated."""
     from django.conf import settings
 
+    from InvenTree.exceptions import log_error
+
     max_attempts = int(settings.Q_CLUSTER.get('max_attempts', 5))
     n = instance.attempt_count
 
     # Only notify once the maximum number of attempts has been reached
     if not instance.success and n >= max_attempts:
-        try:
-            url = InvenTree.helpers_model.construct_absolute_url(
-                reverse(
-                    'admin:django_q_failure_change', kwargs={'object_id': instance.pk}
-                )
-            )
-        except (ValueError, NoReverseMatch):
-            url = ''
+        # Create a new Error object associated with this failed task
+        # This will, in turn, trigger a notification to staff users via the Error post_save signal
 
-        # Function name
-        f = instance.func
-
-        notify_staff_users_of_error(
-            instance,
-            'inventree.task_failure',
-            {
-                'failure': instance,
-                'name': _('Task Failure'),
-                'message': _(f"Background worker task '{f}' failed after {n} attempts"),
-                'link': url,
-            },
+        log_error(
+            'task_failure',
+            scope='worker',
+            error_name='Task Failure',
+            error_info=f"Task '{instance.pk}' failed after {n} attempts",
+            error_data=str(instance.result) if instance.result else '',
         )
 
 
@@ -1493,7 +1521,7 @@ class InvenTreeImageMixin(models.Model):
 
     def rename_image(self, filename):
         """Rename the uploaded image file using the IMAGE_RENAME function."""
-        return self.IMAGE_RENAME(filename)  # type: ignore
+        return self.IMAGE_RENAME(filename)
 
     image = StdImageField(
         upload_to=rename_image,

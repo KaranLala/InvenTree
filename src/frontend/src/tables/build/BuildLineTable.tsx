@@ -1,3 +1,14 @@
+import { ActionButton } from '@lib/components/ActionButton';
+import { ProgressBar } from '@lib/components/ProgressBar';
+import { RowEditAction, RowViewAction } from '@lib/components/RowActions';
+import { ApiEndpoints } from '@lib/enums/ApiEndpoints';
+import { ModelType } from '@lib/enums/ModelType';
+import { UserRoles } from '@lib/enums/Roles';
+import { apiUrl } from '@lib/functions/Api';
+import { formatDecimal } from '@lib/functions/Formatting';
+import useTable from '@lib/hooks/UseTable';
+import type { TableFilter } from '@lib/types/Filters';
+import type { RowAction, TableColumn } from '@lib/types/Tables';
 import { t } from '@lingui/core/macro';
 import { Alert, Group, Paper, Text } from '@mantine/core';
 import {
@@ -13,36 +24,27 @@ import {
 import type { DataTableRowExpansionProps } from 'mantine-datatable';
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-
-import { ActionButton } from '@lib/components/ActionButton';
-import { ProgressBar } from '@lib/components/ProgressBar';
-import { RowEditAction, RowViewAction } from '@lib/components/RowActions';
-import { ApiEndpoints } from '@lib/enums/ApiEndpoints';
-import { ModelType } from '@lib/enums/ModelType';
-import { UserRoles } from '@lib/enums/Roles';
-import { apiUrl } from '@lib/functions/Api';
-import { formatDecimal } from '@lib/functions/Formatting';
-import type { TableFilter } from '@lib/types/Filters';
-import type { RowAction, TableColumn } from '@lib/types/Tables';
 import OrderPartsWizard from '../../components/wizards/OrderPartsWizard';
 import {
   useAllocateStockToBuildForm,
+  useBuildAutoAllocateFields,
   useBuildOrderFields,
   useConsumeBuildLinesForm
 } from '../../forms/BuildForms';
+import useBackgroundTask from '../../hooks/UseBackgroundTask';
 import {
   useCreateApiFormModal,
   useDeleteApiFormModal,
   useEditApiFormModal
 } from '../../hooks/UseForm';
 import useStatusCodes from '../../hooks/UseStatusCodes';
-import { useTable } from '../../hooks/UseTable';
 import { useUserState } from '../../states/UserState';
 import {
   BooleanColumn,
   CategoryColumn,
   DecimalColumn,
   DescriptionColumn,
+  IPNColumn,
   LocationColumn,
   PartColumn,
   RenderPartColumn
@@ -90,7 +92,9 @@ export function BuildLineSubTable({
       },
       {
         accessor: 'stock_item_detail.batch',
-        title: t`Batch`
+        title: t`Batch`,
+        copyable: true,
+        copyAccessor: 'stock_item_detail.batch'
       },
       LocationColumn({
         accessor: 'location_detail'
@@ -317,6 +321,7 @@ export default function BuildLineTable({
         ordering: 'part',
         sortable: true,
         switchable: false,
+        filter: ['assembly', 'testable', 'tracked'],
         render: (record: any) => {
           const hasAllocatedItems = record.allocatedQuantity > 0;
 
@@ -331,11 +336,7 @@ export default function BuildLineTable({
           );
         }
       }),
-      {
-        accessor: 'part_detail.IPN',
-        sortable: false,
-        title: t`IPN`
-      },
+      IPNColumn({}),
       CategoryColumn({
         accessor: 'category_detail',
         defaultVisible: false,
@@ -355,12 +356,14 @@ export default function BuildLineTable({
       BooleanColumn({
         accessor: 'bom_item_detail.optional',
         ordering: 'optional',
+        filter: 'optional',
         hidden: hasOutput,
         defaultVisible: false
       }),
       BooleanColumn({
         accessor: 'bom_item_detail.consumable',
         ordering: 'consumable',
+        filter: 'consumable',
         hidden: hasOutput,
         defaultVisible: false
       }),
@@ -380,6 +383,7 @@ export default function BuildLineTable({
       BooleanColumn({
         accessor: 'part_detail.trackable',
         ordering: 'trackable',
+        filter: 'tracked',
         hidden: hasOutput,
         defaultVisible: false
       }),
@@ -456,6 +460,7 @@ export default function BuildLineTable({
       {
         accessor: 'available_stock',
         sortable: true,
+        filter: 'available',
         switchable: false,
         render: renderAvailableColumn
       },
@@ -480,12 +485,14 @@ export default function BuildLineTable({
       DecimalColumn({
         accessor: 'on_order',
         defaultVisible: false,
+        filter: 'on_order',
         sortable: true
       }),
       {
         accessor: 'allocated',
         switchable: false,
         sortable: true,
+        filter: 'allocated',
         hidden: !isActive,
         minWidth: 125,
         render: (record: any) => {
@@ -531,11 +538,15 @@ export default function BuildLineTable({
       {
         accessor: 'consumed',
         sortable: true,
+        filter: 'consumed',
         hidden: !!output?.pk,
         minWidth: 125,
         render: (record: any) => {
           return record?.bom_item_detail?.consumable ? (
-            <Text style={{ fontStyle: 'italic' }}>{t`Consumable item`}</Text>
+            <Text
+              size='sm'
+              style={{ fontStyle: 'italic' }}
+            >{t`Consumable item`}</Text>
           ) : (
             <ProgressBar
               progressLabel={true}
@@ -569,34 +580,61 @@ export default function BuildLineTable({
     modelType: ModelType.build
   });
 
+  const [allocateTaskId, setAllocateTaskId] = useState<string>('');
+  const [autoAllocateInitialData, setAutoAllocateInitialData] = useState<
+    Record<string, any>
+  >({});
+
+  useBackgroundTask({
+    taskId: allocateTaskId,
+    message: t`Allocating stock to build order`,
+    successMessage: t`Stock allocation complete`,
+    onSuccess: () => {
+      table.refreshTable();
+    }
+  });
+
+  const autoAllocatePreFormContent = useMemo(() => {
+    const n = table.selectedRecords.length;
+    if (n > 0) {
+      return (
+        <Alert color='blue' title={t`Auto Allocate Stock`}>
+          <Text>
+            {t`Auto-allocating stock for`} {n} {t`selected line item(s)`}
+          </Text>
+        </Alert>
+      );
+    }
+    return (
+      <Alert color='green' title={t`Auto Allocate Stock`}>
+        <Text>{t`Automatically allocate untracked BOM items to this build according to the selected options`}</Text>
+      </Alert>
+    );
+  }, [table.selectedRecords]);
+
   const autoAllocateStock = useCreateApiFormModal({
     url: ApiEndpoints.build_order_auto_allocate,
     pk: build.pk,
     title: t`Allocate Stock`,
-    fields: {
-      location: {
-        filters: {
-          structural: false
-        }
-      },
-      exclude_location: {},
-      interchangeable: {},
-      substitutes: {},
-      optional_items: {}
-    },
+    fields: useBuildAutoAllocateFields({
+      item_type: 'untracked'
+    }),
     initialData: {
       location: build.take_from,
       interchangeable: true,
       substitutes: true,
-      optional_items: false
+      optional_items: false,
+      ...autoAllocateInitialData
     },
-    successMessage: t`Auto allocation in progress`,
-    table: table,
-    preFormContent: (
-      <Alert color='green' title={t`Auto Allocate Stock`}>
-        <Text>{t`Automatically allocate stock to this build according to the selected options`}</Text>
-      </Alert>
-    )
+    successMessage: null,
+    onFormSuccess: (response: any) => {
+      if (response.task_id) {
+        setAllocateTaskId(response.task_id);
+      } else {
+        table.refreshTable();
+      }
+    },
+    preFormContent: autoAllocatePreFormContent
   });
 
   const allocateStock = useAllocateStockToBuildForm({
@@ -677,12 +715,28 @@ export default function BuildLineTable({
     parts: partsToOrder
   });
 
+  const [consumeTaskId, setConsumeTaskId] = useState<string>('');
+
+  useBackgroundTask({
+    taskId: consumeTaskId,
+    message: t`Consuming allocated stock`,
+    successMessage: t`Stock consumed successfully`,
+    onSuccess: () => {
+      table.refreshTable();
+    }
+  });
+
   const consumeLines = useConsumeBuildLinesForm({
     buildId: build.pk,
     buildLines: selectedRows,
-    onFormSuccess: () => {
+    onFormSuccess: (response: any) => {
       table.clearSelectedRecords();
-      table.refreshTable();
+
+      if (response.task_id) {
+        setConsumeTaskId(response.task_id);
+      } else {
+        table.refreshTable();
+      }
     }
   });
 
@@ -714,7 +768,9 @@ export default function BuildLineTable({
         !consumable &&
         user.hasChangeRole(UserRoles.build) &&
         required > 0 &&
-        record.trackable == hasOutput;
+        (hasOutput ? trackable : true);
+
+      const disableAllocation = !hasOutput && trackable;
 
       // Can de-allocate
       const canDeallocate =
@@ -737,6 +793,10 @@ export default function BuildLineTable({
           icon: <IconArrowRight />,
           title: t`Allocate Stock`,
           hidden: !canAllocate,
+          disabled: disableAllocation,
+          tooltip: disableAllocation
+            ? t`Trackable parts must be allocated via the Build Outputs tab`
+            : t`Allocate Stock`,
           color: 'green',
           onClick: () => {
             setSelectedRows([record]);
@@ -776,7 +836,7 @@ export default function BuildLineTable({
         {
           icon: <IconTool />,
           title: t`Build Stock`,
-          hidden: !canBuild,
+          hidden: !canBuild || !isActive,
           color: 'blue',
           onClick: () => {
             setInitialData({
@@ -795,7 +855,7 @@ export default function BuildLineTable({
         })
       ];
     },
-    [user, navigate, output, build, buildStatus]
+    [user, navigate, output, build, buildStatus, isActive]
   );
 
   const tableActions = useMemo(() => {
@@ -810,6 +870,9 @@ export default function BuildLineTable({
         hidden={!visible || hasOutput}
         color='blue'
         onClick={() => {
+          setAutoAllocateInitialData({
+            build_lines: table.selectedRecords.map((r) => r.pk)
+          });
           autoAllocateStock.open();
         }}
       />,

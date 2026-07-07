@@ -19,10 +19,10 @@ logger = structlog.get_logger('inventree')
 
 
 def log_error(
-    path,
-    error_name=None,
-    error_info=None,
-    error_data=None,
+    path: Optional[str] = None,
+    error_name: Optional[str] = None,
+    error_info: Optional[str] = None,
+    error_data: Optional[str] = None,
     scope: Optional[str] = None,
     plugin: Optional[str] = None,
 ):
@@ -66,7 +66,7 @@ def log_error(
         data = error_data
     else:
         try:
-            formatted_exception = traceback.format_exception(kind, info, data)  # type: ignore[no-matching-overload]
+            formatted_exception = traceback.format_exception(kind, info, data)
             data = '\n'.join(formatted_exception)
         except AttributeError:
             data = 'No traceback information available'

@@ -64,11 +64,24 @@ class InvenTreeConfig(AppConfig):
             self.collect_tasks()
             self.start_background_tasks()
 
-            if not InvenTree.ready.isInTestMode():  # pragma: no cover
-                # Update exchange rates
-                InvenTree.tasks.offload_task(InvenTree.tasks.update_exchange_rates)
+            if (
+                not InvenTree.ready.isInTestMode()
+                and not InvenTree.ready.isInWorkerThread()
+            ):  # pragma: no cover
                 # Let the background worker check for migrations
-                InvenTree.tasks.offload_task(InvenTree.tasks.check_for_migrations)
+                # Don't offload task if we are already *in* the background worker, otherwise we might end up in a deadlock situation
+
+                try:
+                    InvenTree.tasks.offload_task(InvenTree.tasks.check_for_migrations)
+                except Exception as exc:
+                    logger.exception(
+                        'Failed to offload check_for_migrations task: %s', exc
+                    )
+
+                # Update exchange rates
+                InvenTree.tasks.offload_task(
+                    InvenTree.tasks.update_exchange_rates, force_async=True
+                )
 
         self.update_site_url()
         self.load_unit_registry()
@@ -175,13 +188,10 @@ class InvenTreeConfig(AppConfig):
     @ignore_ready_warning
     def add_heartbeat(self):
         """Ensure there is at least one background task in the queue."""
-        import django_q.models
-
         try:
-            if django_q.models.OrmQ.objects.count() == 0:
-                InvenTree.tasks.offload_task(
-                    InvenTree.tasks.heartbeat, force_async=True, group='heartbeat'
-                )
+            InvenTree.tasks.offload_task(
+                InvenTree.tasks.heartbeat, force_async=True, group='heartbeat'
+            )
         except AppRegistryNotReady:  # pragma: no cover
             pass
         except Exception:
@@ -329,6 +339,11 @@ class InvenTreeConfig(AppConfig):
         """Ensures there are no open migrations, stop if inconsistent state."""
         global MIGRATIONS_CHECK_DONE
         if MIGRATIONS_CHECK_DONE:
+            return
+
+        # Exit early if we are not in a state where we can access the database,
+        # otherwise we might end up in a deadlock situation
+        if not InvenTree.ready.canAppAccessDatabase():
             return
 
         if not InvenTree.tasks.check_for_migrations():

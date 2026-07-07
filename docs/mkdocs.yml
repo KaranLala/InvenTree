@@ -87,18 +87,22 @@ nav:
     - Project Details:
       - Governance: project/governance.md
       - Project Security: security.md
-      - Resources: project/resources.md
+      - Sponsored Resources: project/sponsored_resources.md
       - Privacy: privacy.md
   - Concepts:
     - Terminology: concepts/terminology.md
+    - User Interface: concepts/user_interface.md
     - Threat Model: concepts/threat_model.md
     - Physical Units: concepts/units.md
     - Companies: concepts/company.md
     - Custom States: concepts/custom_states.md
+    - Data Export: concepts/data_export.md
+    - Data Import: concepts/data_import.md
     - Pricing: concepts/pricing.md
     - Project Codes: concepts/project_codes.md
     - Attachments: concepts/attachments.md
     - Parameters: concepts/parameters.md
+    - Tags: concepts/tags.md
     - Barcodes:
       - Barcode Support: barcodes/index.md
       - Internal Barcodes: barcodes/internal.md
@@ -137,17 +141,20 @@ nav:
   - Stock:
     - Stock Items: stock/index.md
     - Availability: stock/availability.md
+    - Traceability: stock/traceability.md
     - Stock Tracking: stock/tracking.md
     - Stock Status: stock/status.md
     - Adjusting Stock: stock/adjust.md
     - Stock Expiry: stock/expiry.md
     - Stock Ownership: stock/owner.md
     - Test Results: stock/test.md
+    - Transfer Orders: stock/transfer_order.md
   - Manufacturing:
     - Manufacturing: manufacturing/index.md
     - Bill of Materials: manufacturing/bom.md
     - Build Orders: manufacturing/build.md
     - Build Outputs: manufacturing/output.md
+    - Required Quantity: manufacturing/required.md
     - Allocating Stock: manufacturing/allocate.md
     - External Manufacturing: manufacturing/external.md
     - Example Build Order: manufacturing/example.md
@@ -182,8 +189,6 @@ nav:
       - Multi Factor Authentication: settings/MFA.md
       - Email Settings: settings/email.md
       - Experimental Features: settings/experimental.md
-    - Export Data: settings/export.md
-    - Import Data: settings/import.md
     - Operations:
       - Background Tasks: settings/tasks.md
       - Error Logs: settings/logs.md
@@ -261,6 +266,7 @@ nav:
     - Stock: app/stock.md
     - Purchase Orders: app/po.md
     - Sales Orders: app/so.md
+    - Build Orders: app/build.md
     - Settings: app/settings.md
     - Privacy: app/privacy.md
     - Translation: app/translation.md

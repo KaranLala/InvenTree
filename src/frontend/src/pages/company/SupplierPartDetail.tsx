@@ -9,12 +9,14 @@ import {
 import { type ReactNode, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
+import TagsList from '@lib/components/TagsList';
 import { ApiEndpoints } from '@lib/enums/ApiEndpoints';
 import { ModelType } from '@lib/enums/ModelType';
 import { UserRoles } from '@lib/enums/Roles';
 import { apiUrl } from '@lib/functions/Api';
 import { formatDecimal } from '@lib/functions/Formatting';
 import { getDetailUrl } from '@lib/functions/Navigation';
+import type { PanelType } from '@lib/types/Panel';
 import AdminButton from '../../components/buttons/AdminButton';
 import {
   type DetailsField,
@@ -34,7 +36,6 @@ import InstanceDetail from '../../components/nav/InstanceDetail';
 import { PageDetail } from '../../components/nav/PageDetail';
 import AttachmentPanel from '../../components/panels/AttachmentPanel';
 import NotesPanel from '../../components/panels/NotesPanel';
-import type { PanelType } from '../../components/panels/Panel';
 import { PanelGroup } from '../../components/panels/PanelGroup';
 import ParametersPanel from '../../components/panels/ParametersPanel';
 import { useSupplierPartFields } from '../../forms/CompanyForms';
@@ -67,7 +68,8 @@ export default function SupplierPartDetail() {
     params: {
       part_detail: true,
       supplier_detail: true,
-      manufacturer_detail: true
+      manufacturer_detail: true,
+      tags: true
     }
   });
 
@@ -79,9 +81,11 @@ export default function SupplierPartDetail() {
     const data = supplierPart ?? {};
 
     // Access nested data
-    data.manufacturer = data.manufacturer_detail?.pk;
-    data.MPN = data.manufacturer_part_detail?.MPN;
-    data.manufacturer_part = data.manufacturer_part_detail?.pk;
+    data.manufacturer =
+      supplierPart.manufacturer || data.manufacturer_detail?.pk;
+    data.MPN = supplierPart.MPN || data.manufacturer_part_detail?.MPN;
+    data.manufacturer_part =
+      supplierPart.manufacturer_part || data.manufacturer_part_detail?.pk;
 
     const tl: DetailsField[] = [
       {
@@ -219,20 +223,23 @@ export default function SupplierPartDetail() {
 
     return (
       <ItemDetailsGrid>
-        <Grid grow>
-          <DetailsImage
-            appRole={UserRoles.part}
-            src={supplierPart?.part_detail?.image}
-            apiPath={apiUrl(
-              ApiEndpoints.part_list,
-              supplierPart?.part_detail?.pk
-            )}
-            pk={supplierPart?.part_detail?.pk}
-          />
-          <Grid.Col span={8}>
-            <DetailsTable title={t`Part Details`} fields={tl} item={data} />
-          </Grid.Col>
-        </Grid>
+        <Stack gap='xs'>
+          <Grid grow>
+            <DetailsImage
+              appRole={UserRoles.part}
+              src={supplierPart?.part_detail?.image}
+              apiPath={apiUrl(
+                ApiEndpoints.part_list,
+                supplierPart?.part_detail?.pk
+              )}
+              pk={supplierPart?.part_detail?.pk}
+            />
+            <Grid.Col span={8}>
+              <DetailsTable title={t`Part Details`} fields={tl} item={data} />
+            </Grid.Col>
+          </Grid>
+          <TagsList tags={supplierPart.tags} />
+        </Stack>
         <DetailsTable title={t`Supplier`} fields={bl} item={data} />
         <DetailsTable title={t`Packaging`} fields={br} item={data} />
         <DetailsTable title={t`Availability`} fields={tr} item={data} />
@@ -295,7 +302,8 @@ export default function SupplierPartDetail() {
       }),
       NotesPanel({
         model_type: ModelType.supplierpart,
-        model_id: supplierPart?.pk
+        model_id: supplierPart?.pk,
+        has_note: !!supplierPart?.notes
       })
     ];
   }, [supplierPart]);
@@ -336,6 +344,7 @@ export default function SupplierPartDetail() {
     pk: supplierPart?.pk,
     title: t`Edit Supplier Part`,
     fields: supplierPartFields,
+    queryParams: new URLSearchParams({ tags: 'true' }),
     onFormSuccess: refreshInstance
   });
 

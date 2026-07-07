@@ -6,6 +6,7 @@ from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 
 from common.models import InvenTreeSetting, Parameter, ParameterTemplate
+from common.settings import set_global_setting
 from InvenTree.unit_test import InvenTreeAPITestCase
 
 from .models import Part, PartCategory, PartCategoryParameterTemplate
@@ -141,11 +142,48 @@ class TestParams(TestCase):
         # And we can delete the parameter
         parameter.delete()
 
+    def test_locked_part_locking_disabled(self):
+        """Test that parameter restrictions are lifted when PART_ENABLE_LOCKING is disabled."""
+        part = Part.objects.create(
+            name='Test Part Lock Override',
+            description='Part for testing global locking override',
+            category=PartCategory.objects.first(),
+        )
+
+        parameter = Parameter.objects.create(
+            content_object=part, template=ParameterTemplate.objects.first(), data='100'
+        )
+
+        part.locked = True
+        part.save()
+
+        # With locking enabled (default), editing and deletion are blocked
+        with self.assertRaises(django_exceptions.ValidationError):
+            parameter.data = '200'
+            parameter.save()
+
+        with self.assertRaises(django_exceptions.ValidationError):
+            parameter.delete()
+
+        # Disable locking globally — parameter operations should now succeed
+        set_global_setting('PART_ENABLE_LOCKING', False)
+
+        parameter.data = '200'
+        parameter.save()
+        self.assertEqual(parameter.data, '200')
+
+        # Re-enable locking — editing should be blocked again
+        set_global_setting('PART_ENABLE_LOCKING', True)
+
+        with self.assertRaises(django_exceptions.ValidationError):
+            parameter.data = '300'
+            parameter.save()
+
 
 class TestCategoryTemplates(TransactionTestCase):
     """Test class for PartCategoryParameterTemplate model."""
 
-    fixtures = ['location', 'category', 'part', 'params']
+    fixtures = ['tenant', 'location', 'category', 'part', 'params']
 
     def test_validate(self):
         """Test that category templates are correctly applied to Part instances."""

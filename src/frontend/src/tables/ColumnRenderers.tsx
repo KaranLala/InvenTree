@@ -49,7 +49,12 @@ export type PartColumnProps = TableColumnProps & {
 export function RenderPartColumn({
   part,
   full_name
-}: { part: any; full_name?: boolean }) {
+}: {
+  part: any;
+  full_name?: boolean;
+}) {
+  const globalSettings = useGlobalSettingsState.getState();
+
   if (!part) {
     return <Skeleton />;
   }
@@ -67,7 +72,7 @@ export function RenderPartColumn({
             <IconExclamationCircle color='red' size={16} />
           </Tooltip>
         )}
-        {part?.locked && (
+        {globalSettings.isSet('PART_ENABLE_LOCKING') && part?.locked && (
           <Tooltip label={t`Part is Locked`}>
             <IconLock size={16} />
           </Tooltip>
@@ -91,10 +96,10 @@ export function PartColumn(props: PartColumnProps): TableColumn {
     switchable: false,
     minWidth: '175px',
     render: (record: any) => {
-      const part =
-        props.part === ''
-          ? record
-          : resolveItem(record, props.part ?? props.accessor ?? 'part_detail');
+      const part = resolveItem(
+        record,
+        props.part ?? props.accessor ?? 'part_detail'
+      );
 
       return RenderPartColumn({
         part: part,
@@ -105,7 +110,190 @@ export function PartColumn(props: PartColumnProps): TableColumn {
   };
 }
 
-export function CompanyColumn({ company }: { company: any }) {
+export function IPNColumn(props: TableColumnProps): TableColumn {
+  return {
+    accessor: 'part_detail.IPN',
+    sortable: true,
+    ordering: 'IPN',
+    switchable: true,
+    title: t`IPN`,
+    copyable: true,
+    filter: 'has_ipn',
+    ...props
+  };
+}
+
+export type StockColumnProps = TableColumnProps & {
+  nullMessage?: string | ReactNode;
+};
+
+// Render a StockItem instance within a table
+export function StockColumn(props: StockColumnProps): TableColumn {
+  return {
+    title: t`Stock Item`,
+    ...props,
+    ordering: props.ordering || 'stock',
+    accessor: props.accessor || 'stock',
+    render: (record: any) => {
+      const stock_item =
+        resolveItem(record, props.accessor ?? 'stock_item_detail') ?? {};
+      const part = stock_item.part_detail ?? {};
+
+      const quantity = stock_item.quantity ?? 0;
+      const allocated = stock_item.allocated ?? 0;
+      const available = quantity - allocated;
+
+      const extra: ReactNode[] = [];
+      let color = undefined;
+      let text = formatDecimal(quantity);
+
+      // Handle case where stock item detail is not provided
+      if (!stock_item || !stock_item.pk) {
+        return props.nullMessage ?? '-';
+      }
+
+      // Override with serial number if available
+      if (stock_item.serial && quantity == 1) {
+        text = `# ${stock_item.serial}`;
+      }
+
+      if (record.is_building) {
+        color = 'blue';
+        extra.push(
+          <Text
+            key='production'
+            size='sm'
+          >{t`This stock item is in production`}</Text>
+        );
+      } else if (record.sales_order) {
+        extra.push(
+          <Text
+            key='sales-order'
+            size='sm'
+          >{t`This stock item has been assigned to a sales order`}</Text>
+        );
+      } else if (record.customer) {
+        extra.push(
+          <Text
+            key='customer'
+            size='sm'
+          >{t`This stock item has been assigned to a customer`}</Text>
+        );
+      } else if (record.belongs_to) {
+        extra.push(
+          <Text
+            key='belongs-to'
+            size='sm'
+          >{t`This stock item is installed in another stock item`}</Text>
+        );
+      } else if (record.consumed_by) {
+        extra.push(
+          <Text
+            key='consumed-by'
+            size='sm'
+          >{t`This stock item has been consumed by a build order`}</Text>
+        );
+      } else if (!record.in_stock) {
+        extra.push(
+          <Text
+            key='unavailable'
+            size='sm'
+          >{t`This stock item is unavailable`}</Text>
+        );
+      }
+
+      if (record.expired) {
+        extra.push(
+          <Text key='expired' size='sm'>{t`This stock item has expired`}</Text>
+        );
+      } else if (record.stale) {
+        extra.push(
+          <Text key='stale' size='sm'>{t`This stock item is stale`}</Text>
+        );
+      }
+
+      if (record.in_stock) {
+        if (allocated > 0) {
+          if (allocated > quantity) {
+            color = 'red';
+            extra.push(
+              <Text
+                key='over-allocated'
+                size='sm'
+              >{t`This stock item is over-allocated`}</Text>
+            );
+          } else if (allocated == quantity) {
+            color = 'orange';
+            extra.push(
+              <Text
+                key='fully-allocated'
+                size='sm'
+              >{t`This stock item is fully allocated`}</Text>
+            );
+          } else {
+            extra.push(
+              <Text
+                key='partially-allocated'
+                size='sm'
+              >{t`This stock item is partially allocated`}</Text>
+            );
+          }
+        }
+
+        if (available != quantity) {
+          if (available > 0) {
+            extra.push(
+              <Text key='available' size='sm' c='orange'>
+                {`${t`Available`}: ${formatDecimal(available)}`}
+              </Text>
+            );
+          } else {
+            extra.push(
+              <Text
+                key='no-stock'
+                size='sm'
+                c='red'
+              >{t`No stock available`}</Text>
+            );
+          }
+        }
+
+        if (quantity <= 0) {
+          extra.push(
+            <Text
+              key='depleted'
+              size='sm'
+            >{t`This stock item has been depleted`}</Text>
+          );
+        }
+      }
+
+      if (!record.in_stock) {
+        color = 'red';
+      }
+
+      return (
+        <TableHoverCard
+          value={
+            <Group gap='xs' justify='left' wrap='nowrap'>
+              <Text>{text}</Text>
+              {part.units && <Text size='xs'>[{part.units}]</Text>}
+            </Group>
+          }
+          title={t`Stock Information`}
+          extra={extra}
+          iconColor={color}
+        />
+      );
+    }
+  };
+}
+
+export function CompanyColumn({
+  company
+}: {
+  company: any;
+}) {
   return company ? (
     <Group gap='xs' wrap='nowrap'>
       <Thumbnail
@@ -139,15 +327,15 @@ export function PathColumn(props: TableColumnProps): TableColumn {
       const pathstring = instance.pathstring || name;
 
       if (name == pathstring) {
-        return <Text>{name}</Text>;
+        return <Text size='sm'>{name}</Text>;
       }
 
       return (
         <TableHoverCard
-          value={<Text>{instance.name}</Text>}
+          value={<Text size='sm'>{instance.name}</Text>}
           icon='sitemap'
-          title={props.title}
-          extra={[<Text>{instance.pathstring}</Text>]}
+          title={props.title?.toLocaleString() ?? t`Path`}
+          extra={[<Text size='sm'>{instance.pathstring}</Text>]}
         />
       );
     }
@@ -247,6 +435,7 @@ export function BooleanColumn(props: TableColumn): TableColumn {
     sortable: true,
     switchable: true,
     minWidth: '75px',
+    filter: props.filter ?? props.accessor,
     render: (record: any) => (
       <Center>
         <YesNoButton value={resolveItem(record, props.accessor ?? '')} />
@@ -273,6 +462,7 @@ export function DescriptionColumn(props: TableColumnProps): TableColumn {
     sortable: false,
     switchable: true,
     minWidth: '200px',
+    copyable: true,
     ...props
   };
 }
@@ -282,6 +472,8 @@ export function LinkColumn(props: TableColumnProps): TableColumn {
     accessor: 'link',
     sortable: false,
     defaultVisible: false,
+    copyable: true,
+    copyAccessor: props.accessor ?? 'link',
     render: (record: any) => {
       const url = resolveItem(record, props.accessor ?? 'link');
 
@@ -315,6 +507,7 @@ export function ReferenceColumn(props: TableColumnProps): TableColumn {
     title: t`Reference`,
     sortable: true,
     switchable: true,
+    copyable: true,
     ...props
   };
 }
@@ -345,6 +538,25 @@ export function LineItemsProgressColumn(props: TableColumnProps): TableColumn {
   };
 }
 
+export function AllocatedLinesProgressColumn(
+  props: TableColumnProps
+): TableColumn {
+  return {
+    accessor: 'allocated_lines',
+    sortable: true,
+    title: t`Allocated Lines`,
+    minWidth: 125,
+    render: (record: any) => (
+      <ProgressBar
+        progressLabel={true}
+        value={record.allocated_lines}
+        maximum={record.line_items}
+      />
+    ),
+    ...props
+  };
+}
+
 export function ProjectCodeColumn(props: TableColumnProps): TableColumn {
   const globalSettings = useGlobalSettingsState.getState();
   const enabled = globalSettings.isSet('PROJECT_CODES_ENABLED', true);
@@ -355,6 +567,7 @@ export function ProjectCodeColumn(props: TableColumnProps): TableColumn {
     sortable: true,
     title: t`Project Code`,
     hidden: !enabled,
+    filter: 'project_code',
     render: (record: any) => {
       const project_code = resolveItem(
         record,
@@ -393,6 +606,7 @@ export function StatusColumn(props: StatusColumnProps): TableColumn {
 
   return {
     accessor: 'status',
+    filter: 'status',
     sortable: true,
     switchable: true,
     minWidth: '50px',
@@ -445,6 +659,7 @@ export function CreatedByColumn(props: TableColumnProps): TableColumn {
     accessor: 'created_by',
     ordering: 'created_by',
     title: t`Created By`,
+    filter: 'created_by',
     ...props
   });
 }
@@ -474,6 +689,7 @@ export function ResponsibleColumn(props: TableColumnProps): TableColumn {
     accessor: 'responsible_detail',
     ordering: 'responsible',
     title: t`Responsible`,
+    filter: 'assigned_to',
     ...props
   });
 }
@@ -488,6 +704,7 @@ export function DateColumn(props: TableColumnProps): TableColumn {
       formatDate(resolveItem(record, props.accessor ?? 'date'), {
         showTime: props.extra?.showTime
       }),
+    copyable: true,
     ...props
   };
 }
@@ -496,6 +713,7 @@ export function StartDateColumn(props: TableColumnProps): TableColumn {
   return DateColumn({
     accessor: 'start_date',
     title: t`Start Date`,
+    filter: ['has_start_date', 'start_date_before', 'start_date_after'],
     ...props
   });
 }
@@ -504,6 +722,7 @@ export function TargetDateColumn(props: TableColumnProps): TableColumn {
   return DateColumn({
     accessor: 'target_date',
     title: t`Target Date`,
+    filter: ['has_target_date', 'target_date_before', 'target_date_after'],
     ...props
   });
 }
@@ -512,6 +731,7 @@ export function CreationDateColumn(props: TableColumnProps): TableColumn {
   return DateColumn({
     accessor: 'creation_date',
     title: t`Creation Date`,
+    filter: ['created_before', 'created_after'],
     ...props
   });
 }
@@ -520,6 +740,7 @@ export function CompletionDateColumn(props: TableColumnProps): TableColumn {
   return DateColumn({
     accessor: 'completion_date',
     title: t`Completion Date`,
+    filter: ['completed_before', 'completed_after'],
     ...props
   });
 }
@@ -528,6 +749,18 @@ export function ShipmentDateColumn(props: TableColumnProps): TableColumn {
   return DateColumn({
     accessor: 'shipment_date',
     title: t`Shipment Date`,
+    filter: ['shipment_date_before', 'shipment_date_after'],
+    ...props
+  });
+}
+
+export function UpdatedAtColumn(props: TableColumnProps): TableColumn {
+  return DateColumn({
+    accessor: 'updated_at',
+    title: t`Updated`,
+    defaultVisible: false,
+    filter: ['updated_before', 'updated_after'],
+    extra: { showTime: true },
     ...props
   });
 }
@@ -578,5 +811,15 @@ export function PercentageColumn({
       const value = resolveItem(record, accessor);
       return formatPercentage(value);
     }
+  };
+}
+
+export function LineItemColumn(props: TableColumnProps): TableColumn {
+  return {
+    accessor: 'line',
+    title: t`Line Item`,
+    sortable: true,
+    switchable: true,
+    ...props
   };
 }

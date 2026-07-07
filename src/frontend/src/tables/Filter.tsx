@@ -3,6 +3,7 @@ import { t } from '@lingui/core/macro';
 import { ApiEndpoints } from '@lib/enums/ApiEndpoints';
 import { ModelType } from '@lib/enums/ModelType';
 import { apiUrl } from '@lib/functions/Api';
+import { isTrue } from '@lib/functions/Conversion';
 import type { TableFilter, TableFilterChoice } from '@lib/types/Filters';
 import type {
   StatusCodeInterface,
@@ -13,6 +14,47 @@ import {
   useGlobalStatusState
 } from '../states/GlobalStatusState';
 import { useGlobalSettingsState } from '../states/SettingsStates';
+
+// Determine the appropriate display label for a given filter, based on its name and the list of available filters
+export function filterDisplayLabel(
+  name: string,
+  filters?: TableFilter[]
+): string {
+  const filter = filters?.find((f) => f.name === name);
+  return filter?.label ?? name;
+}
+
+// Determine the appropriate display value for a filter, based on its type and value
+// This is useful for recreating a display value if we only have a name:value pair
+export function filterDisplayValue(
+  name: string,
+  value: any,
+  filters?: TableFilter[]
+) {
+  const filterDef = filters?.find((f) => f.name === name);
+
+  if (!filterDef) {
+    return value;
+  }
+
+  if (!filterDef.type || filterDef.type == 'boolean') {
+    return isTrue(value) ? t`Yes` : t`No`;
+  }
+
+  if (filterDef.type === 'choice' && filterDef.choices) {
+    const choice = filterDef.choices.find((c) => c.value === value);
+    return choice ? choice.label : value;
+  }
+
+  if (filterDef.type === 'choice' && filterDef.choiceFunction) {
+    const choices = filterDef.choiceFunction();
+    const choice = choices.find((c) => c.value === value);
+    return choice ? choice.label : value;
+  }
+
+  // No obvious match - return the raw value
+  return value;
+}
 
 /**
  * Return list of available filter options for a given filter
@@ -208,6 +250,24 @@ export function StartDateAfterFilter(): TableFilter {
   };
 }
 
+export function HasStartDateFilter(): TableFilter {
+  return {
+    name: 'has_start_date',
+    type: 'boolean',
+    label: t`Has Start Date`,
+    description: t`Show items with a start date`
+  };
+}
+
+export function HasTargetDateFilter(): TableFilter {
+  return {
+    name: 'has_target_date',
+    type: 'boolean',
+    label: t`Has Target Date`,
+    description: t`Show items with a target date`
+  };
+}
+
 export function TargetDateBeforeFilter(): TableFilter {
   return {
     name: 'target_date_before',
@@ -240,6 +300,24 @@ export function CompletedAfterFilter(): TableFilter {
     name: 'completed_after',
     label: t`Completed After`,
     description: t`Show items completed after this date`,
+    type: 'date'
+  };
+}
+
+export function UpdatedAfterFilter(): TableFilter {
+  return {
+    name: 'updated_after',
+    label: t`Updated After`,
+    description: t`Show items updated after this date`,
+    type: 'date'
+  };
+}
+
+export function UpdatedBeforeFilter(): TableFilter {
+  return {
+    name: 'updated_before',
+    label: t`Updated Before`,
+    description: t`Show items updated before this date`,
     type: 'date'
   };
 }
@@ -308,11 +386,13 @@ export function TenantFilter(): TableFilter {
 export function OwnerFilter({
   name,
   label,
-  description
+  description,
+  apiFilter
 }: {
   name: string;
   label: string;
   description: string;
+  apiFilter?: Record<string, any>;
 }): TableFilter {
   return {
     name: name,
@@ -320,6 +400,7 @@ export function OwnerFilter({
     description: description,
     type: 'api',
     apiUrl: apiUrl(ApiEndpoints.owner_list),
+    apiFilter: { is_active: true, ...apiFilter },
     model: ModelType.owner,
     modelRenderer: (instance: any) => instance.name
   };
@@ -333,14 +414,39 @@ export function ResponsibleFilter(): TableFilter {
   });
 }
 
+export function TagsFilter({
+  modelType
+}: {
+  modelType?: ModelType;
+}): TableFilter {
+  return {
+    name: 'tags',
+    label: t`Tags`,
+    description: t`Filter by tags`,
+    placeholder: t`Select tags`,
+    type: 'api',
+    multi: true,
+    apiUrl: apiUrl(ApiEndpoints.tag_list),
+    model: ModelType.tag,
+    modelRenderer: (instance: any) => instance.name,
+    apiFilter: modelType ? { model_type: modelType } : undefined,
+    transform: (item: any) => ({
+      value: item.name.toString(),
+      label: item.name.toString()
+    })
+  };
+}
+
 export function UserFilter({
   name,
   label,
-  description
+  description,
+  apiFilter
 }: {
   name?: string;
   label?: string;
   description?: string;
+  apiFilter?: Record<string, any>;
 }): TableFilter {
   return {
     name: name ?? 'user',
@@ -348,6 +454,7 @@ export function UserFilter({
     description: description ?? t`Filter by user`,
     type: 'api',
     apiUrl: apiUrl(ApiEndpoints.user_list),
+    apiFilter: { is_active: true, ...apiFilter },
     model: ModelType.user,
     modelRenderer: (instance: any) => instance.username
   };

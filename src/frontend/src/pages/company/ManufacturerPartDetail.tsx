@@ -8,11 +8,13 @@ import {
 import { useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
+import TagsList from '@lib/components/TagsList';
 import { ApiEndpoints } from '@lib/enums/ApiEndpoints';
 import { ModelType } from '@lib/enums/ModelType';
 import { UserRoles } from '@lib/enums/Roles';
 import { apiUrl } from '@lib/functions/Api';
 import { getDetailUrl } from '@lib/functions/Navigation';
+import type { PanelType } from '@lib/types/Panel';
 import AdminButton from '../../components/buttons/AdminButton';
 import {
   type DetailsField,
@@ -30,7 +32,6 @@ import InstanceDetail from '../../components/nav/InstanceDetail';
 import { PageDetail } from '../../components/nav/PageDetail';
 import AttachmentPanel from '../../components/panels/AttachmentPanel';
 import NotesPanel from '../../components/panels/NotesPanel';
-import type { PanelType } from '../../components/panels/Panel';
 import { PanelGroup } from '../../components/panels/PanelGroup';
 import ParametersPanel from '../../components/panels/ParametersPanel';
 import { useManufacturerPartFields } from '../../forms/CompanyForms';
@@ -59,7 +60,8 @@ export default function ManufacturerPartDetail() {
     hasPrimaryKey: true,
     params: {
       part_detail: true,
-      manufacturer_detail: true
+      manufacturer_detail: true,
+      tags: true
     }
   });
 
@@ -133,20 +135,23 @@ export default function ManufacturerPartDetail() {
 
     return (
       <ItemDetailsGrid>
-        <Grid grow>
-          <DetailsImage
-            appRole={UserRoles.part}
-            src={manufacturerPart?.part_detail?.image}
-            apiPath={apiUrl(
-              ApiEndpoints.part_list,
-              manufacturerPart?.part_detail?.pk
-            )}
-            pk={manufacturerPart?.part_detail?.pk}
-          />
-          <Grid.Col span={{ base: 12, sm: 8 }}>
-            <DetailsTable title={t`Part Details`} fields={tl} item={data} />
-          </Grid.Col>
-        </Grid>
+        <Stack gap='xs'>
+          <Grid grow>
+            <DetailsImage
+              appRole={UserRoles.part}
+              src={manufacturerPart?.part_detail?.image}
+              apiPath={apiUrl(
+                ApiEndpoints.part_list,
+                manufacturerPart?.part_detail?.pk
+              )}
+              pk={manufacturerPart?.part_detail?.pk}
+            />
+            <Grid.Col span={{ base: 12, sm: 8 }}>
+              <DetailsTable title={t`Part Details`} fields={tl} item={data} />
+            </Grid.Col>
+          </Grid>
+          <TagsList tags={manufacturerPart.tags} />
+        </Stack>
         <DetailsTable title={t`Manufacturer Details`} fields={tr} item={data} />
       </ItemDetailsGrid>
     );
@@ -198,7 +203,8 @@ export default function ManufacturerPartDetail() {
       }),
       NotesPanel({
         model_type: ModelType.manufacturerpart,
-        model_id: manufacturerPart?.pk
+        model_id: manufacturerPart?.pk,
+        has_note: !!manufacturerPart?.notes
       })
     ];
   }, [user, manufacturerPart]);
@@ -210,6 +216,7 @@ export default function ManufacturerPartDetail() {
     pk: manufacturerPart?.pk,
     title: t`Edit Manufacturer Part`,
     fields: editManufacturerPartFields,
+    queryParams: new URLSearchParams({ tags: 'true' }),
     onFormSuccess: refreshInstance
   });
 

@@ -8,7 +8,6 @@ import {
   IconList,
   IconSitemap,
   IconTruckDelivery,
-  IconUser,
   IconUsersGroup
 } from '@tabler/icons-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -37,6 +36,7 @@ import {
 } from '../hooks/UseGenerator';
 import { useGlobalSettingsState } from '../states/SettingsStates';
 import { RenderPartColumn } from '../tables/ColumnRenderers';
+import { TagsField } from './CommonFields';
 
 /**
  * Field set for BuildOrder forms
@@ -125,14 +125,9 @@ export function useBuildOrderFields({
         },
         value: destination
       },
+      tags: TagsField({}),
       link: {
         icon: <IconLink />
-      },
-      issued_by: {
-        icon: <IconUser />,
-        filters: {
-          is_active: true
-        }
       },
       responsible: {
         icon: <IconUsersGroup />,
@@ -226,12 +221,43 @@ export function useBuildOrderOutputFields({
   }, [quantity, batchGenerator.result, serialGenerator.result, trackable]);
 }
 
+export function useBuildAutoAllocateFields({
+  item_type
+}: {
+  item_type: 'all' | 'tracked' | 'untracked';
+}): ApiFormFieldSet {
+  return useMemo(() => {
+    return {
+      location: {},
+      exclude_location: {},
+      item_type: {
+        value: item_type,
+        hidden: true
+      },
+      interchangeable: {
+        hidden: item_type === 'tracked'
+      },
+      substitutes: {},
+      optional_items: {
+        hidden: item_type === 'tracked',
+        value: item_type === 'tracked' ? false : undefined
+      },
+      stock_sort_by: {},
+      build_lines: {
+        hidden: true
+      }
+    };
+  }, [item_type]);
+}
+
 function BuildOutputFormRow({
   props,
-  record
+  record,
+  withQuantityColumn = true
 }: Readonly<{
   props: TableFieldRowProps;
   record: any;
+  withQuantityColumn?: boolean;
 }>) {
   const stockItemColumn = useMemo(() => {
     if (record.serial) {
@@ -271,15 +297,18 @@ function BuildOutputFormRow({
           <RenderPartColumn part={record.part_detail} />
         </Table.Td>
         <Table.Td>{stockItemColumn}</Table.Td>
-        <Table.Td>
-          <TableFieldErrorWrapper props={props} errorKey='output'>
-            {quantityColumn}
-          </TableFieldErrorWrapper>
-        </Table.Td>
+        {withQuantityColumn && (
+          <Table.Td>
+            <TableFieldErrorWrapper props={props} errorKey='output'>
+              {quantityColumn}
+            </TableFieldErrorWrapper>
+          </Table.Td>
+        )}
         <Table.Td>{record.batch}</Table.Td>
         <Table.Td>
           <StatusRenderer
-            status={record.status}
+            status={record.custom_status_key || record.status}
+            fallbackStatus={record.status}
             type={ModelType.stockitem}
           />{' '}
         </Table.Td>
@@ -294,10 +323,12 @@ function BuildOutputFormRow({
 export function useCompleteBuildOutputsForm({
   build,
   outputs,
+  hasTrackedItems,
   onFormSuccess
 }: {
   build: any;
   outputs: any[];
+  hasTrackedItems: boolean;
   onFormSuccess: (response: any) => void;
 }) {
   const [location, setLocation] = useState<number | null>(null);
@@ -312,16 +343,21 @@ export function useCompleteBuildOutputsForm({
     );
   }, [location, build.destination, build.part_detail]);
 
+  // Memoize the outputs once to avoid re-rendering issues
+  const buildOutputs = useMemo(() => {
+    return outputs.map((output: any) => {
+      return {
+        output: output.pk,
+        quantity: output.quantity
+      };
+    });
+  }, [outputs]);
+
   const buildOutputCompleteFields: ApiFormFieldSet = useMemo(() => {
     return {
       outputs: {
         field_type: 'table',
-        value: outputs.map((output: any) => {
-          return {
-            output: output.pk,
-            quantity: output.quantity
-          };
-        }),
+        value: buildOutputs,
         modelRenderer: (row: TableFieldRowProps) => {
           const record = outputs.find((output) => output.pk == row.item.output);
           return (
@@ -348,9 +384,11 @@ export function useCompleteBuildOutputsForm({
         }
       },
       notes: {},
-      accept_incomplete_allocation: {}
+      accept_incomplete_allocation: {
+        hidden: !hasTrackedItems
+      }
     };
-  }, [location, outputs]);
+  }, [location, outputs, hasTrackedItems]);
 
   return useCreateApiFormModal({
     url: apiUrl(ApiEndpoints.build_output_complete, build.pk),
@@ -358,7 +396,7 @@ export function useCompleteBuildOutputsForm({
     title: t`Complete Build Outputs`,
     fields: buildOutputCompleteFields,
     onFormSuccess: onFormSuccess,
-    successMessage: t`Build outputs have been completed`,
+    successMessage: null,
     size: '80%'
   });
 }
@@ -387,16 +425,21 @@ export function useScrapBuildOutputsForm({
     );
   }, [location, build.destination, build.part_detail]);
 
+  // Memoize the outputs once to avoid re-rendering issues
+  const buildOutputs = useMemo(() => {
+    return outputs.map((output: any) => {
+      return {
+        output: output.pk,
+        quantity: output.quantity
+      };
+    });
+  }, [outputs]);
+
   const buildOutputScrapFields: ApiFormFieldSet = useMemo(() => {
     return {
       outputs: {
         field_type: 'table',
-        value: outputs.map((output: any) => {
-          return {
-            output: output.pk,
-            quantity: output.quantity
-          };
-        }),
+        value: buildOutputs,
         modelRenderer: (row: TableFieldRowProps) => {
           const record = outputs.find((output) => output.pk == row.item.output);
           return (
@@ -439,7 +482,7 @@ export function useScrapBuildOutputsForm({
     ),
     fields: buildOutputScrapFields,
     onFormSuccess: onFormSuccess,
-    successMessage: t`Build outputs have been scrapped`,
+    successMessage: null,
     size: '80%'
   });
 }
@@ -453,19 +496,29 @@ export function useCancelBuildOutputsForm({
   outputs: any[];
   onFormSuccess: (response: any) => void;
 }) {
+  // Memoize the outputs once to avoid re-rendering issues
+  const buildOutputs = useMemo(() => {
+    return outputs.map((output: any) => {
+      return {
+        output: output.pk
+      };
+    });
+  }, [outputs]);
+
   const buildOutputCancelFields: ApiFormFieldSet = useMemo(() => {
     return {
       outputs: {
         field_type: 'table',
-        value: outputs.map((output: any) => {
-          return {
-            output: output.pk
-          };
-        }),
+        value: buildOutputs,
         modelRenderer: (row: TableFieldRowProps) => {
           const record = outputs.find((output) => output.pk == row.item.output);
           return (
-            <BuildOutputFormRow props={row} record={record} key={record.pk} />
+            <BuildOutputFormRow
+              props={row}
+              record={record}
+              key={record.pk}
+              withQuantityColumn={false}
+            />
           );
         },
         headers: [
@@ -495,7 +548,7 @@ export function useCancelBuildOutputsForm({
     ),
     fields: buildOutputCancelFields,
     onFormSuccess: onFormSuccess,
-    successMessage: t`Build outputs have been cancelled`,
+    successMessage: null,
     size: '80%'
   });
 }
@@ -702,6 +755,7 @@ export function useAllocateStockToBuildForm({
     preFormContent: preFormContent,
     successMessage: t`Stock items allocated`,
     onFormSuccess: onFormSuccess,
+    keepOpenOption: true,
     initialData: {
       items: lineItems
         .filter((item) => {
@@ -814,7 +868,7 @@ export function useConsumeBuildItemsForm({
     url: ApiEndpoints.build_order_consume,
     pk: buildId,
     title: t`Consume Stock`,
-    successMessage: t`Stock items scheduled to be consumed`,
+    successMessage: null,
     onFormSuccess: onFormSuccess,
     size: '80%',
     fields: consumeFields,
@@ -915,7 +969,7 @@ export function useConsumeBuildLinesForm({
     url: ApiEndpoints.build_order_consume,
     pk: buildId,
     title: t`Consume Stock`,
-    successMessage: t`Stock items scheduled to be consumed`,
+    successMessage: null,
     onFormSuccess: onFormSuccess,
     fields: consumeFields,
     initialData: {

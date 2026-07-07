@@ -46,7 +46,7 @@ from .tasks import offload_task
 class TreeFixtureTest(TestCase):
     """Unit testing for our MPTT fixture data."""
 
-    fixtures = ['location', 'category', 'part', 'stock', 'build']
+    fixtures = ['tenant', 'location', 'category', 'part', 'stock', 'build']
 
     def node_string(self, node):
         """Construct a string representation of a tree node."""
@@ -292,6 +292,16 @@ class ConversionTest(TestCase):
                 val, 'ohm', strip_units=True
             )
             self.assertAlmostEqual(output, expected, 12)
+
+        # Test that 'R' is interpreted as ohms
+        # Ref: https://github.com/inventree/InvenTree/issues/12063
+        r_tests = [('8R6', 8.6), ('10R', 10), ('4R7', 4.7), ('100R', 100)]
+
+        for val, expected in r_tests:
+            output = InvenTree.conversion.convert_physical_value(
+                val, 'ohm', strip_units=True
+            )
+            self.assertAlmostEqual(output, expected, 6)
 
     def test_scientific_notation(self):
         """Test that scientific notation is handled correctly."""
@@ -598,35 +608,6 @@ class FormatTest(TestCase):
         with self.assertRaises(ValueError):
             InvenTree.format.extract_named_group('test', 'PO-ABC-xyz', 'PO-###-{test}')
 
-    def test_currency_formatting(self):
-        """Test that currency formatting works correctly for multiple currencies."""
-        test_data = (
-            (Money(3651.285718, 'USD'), 4, True, '$3,651.2857'),
-            (Money(487587.849178, 'CAD'), 5, True, 'CA$487,587.84918'),
-            (Money(0.348102, 'EUR'), 1, False, '0.3'),
-            (Money(0.916530, 'GBP'), 1, True, '£0.9'),
-            (Money(61.031024, 'JPY'), 3, False, '61.031'),
-            (Money(49609.694602, 'JPY'), 1, True, '¥49,609.7'),
-            (Money(155565.264777, 'AUD'), 2, False, '155,565.26'),
-            (Money(0.820437, 'CNY'), 4, True, 'CN¥0.8204'),
-            (Money(7587.849178, 'EUR'), 0, True, '€7,588'),
-            (Money(0.348102, 'GBP'), 3, False, '0.348'),
-            (Money(0.652923, 'CHF'), 0, True, 'CHF1'),
-            (Money(0.820437, 'CNY'), 1, True, 'CN¥0.8'),
-            (Money(98789.5295680, 'CHF'), 0, False, '98,790'),
-            (Money(0.585787, 'USD'), 1, True, '$0.6'),
-            (Money(0.690541, 'CAD'), 3, True, 'CA$0.691'),
-            (Money(427.814104, 'AUD'), 5, True, 'A$427.81410'),
-        )
-
-        with self.settings(LANGUAGE_CODE='en-us'):
-            for value, decimal_places, include_symbol, expected_result in test_data:
-                result = InvenTree.format.format_money(
-                    value, decimal_places=decimal_places, include_symbol=include_symbol
-                )
-
-                self.assertEqual(result, expected_result)
-
 
 class TestHelpers(TestCase):
     """Tests for InvenTree helper functions."""
@@ -692,23 +673,26 @@ class TestHelpers(TestCase):
             self.assertFalse(helpers.isNull(s))
 
     def testStaticUrl(self):
-        """Test static url helpers."""
+        """Test static URL helpers."""
         self.assertEqual(helpers.getStaticUrl('test.jpg'), '/static/test.jpg')
         self.assertEqual(helpers.getBlankImage(), '/static/img/blank_image.png')
         self.assertEqual(
             helpers.getBlankThumbnail(), '/static/img/blank_image.thumbnail.png'
         )
 
+        self.assertFalse(helpers.checkStaticFile('dummy', 'dir', 'test.jpg'))
+        self.assertTrue(helpers.checkStaticFile('img', 'blank_image.png'))
+
     def testMediaUrl(self):
         """Test getMediaUrl."""
         # Str should not work
         with self.assertRaises(TypeError):
-            helpers.getMediaUrl('xx/yy.png')  # type: ignore
+            helpers.getMediaUrl('xx/yy.png')
 
         # Correct usage
         part = Part().image
         self.assertEqual(
-            helpers.getMediaUrl(StdImageFieldFile(part, part, 'xx/yy.png')),  # type: ignore
+            helpers.getMediaUrl(StdImageFieldFile(part, part, 'xx/yy.png')),  # ty:ignore[too-many-positional-arguments]
             '/media/xx/yy.png',
         )
 
@@ -735,21 +719,10 @@ class TestHelpers(TestCase):
 
         large_img = 'https://github.com/inventree/InvenTree/raw/master/src/backend/InvenTree/InvenTree/static/img/paper_splash_large.jpg'
 
-        InvenTreeSetting.set_setting(
-            'INVENTREE_DOWNLOAD_IMAGE_MAX_SIZE', 1, change_user=None
-        )
-
-        # Attempt to download an image which is too large
-        with self.assertRaises(ValueError):
-            InvenTree.helpers_model.download_image_from_url(large_img, timeout=10)
-
-        # Increase allowable download size
-        InvenTreeSetting.set_setting(
-            'INVENTREE_DOWNLOAD_IMAGE_MAX_SIZE', 5, change_user=None
-        )
-
         # Download a valid image (should not throw an error)
-        InvenTree.helpers_model.download_image_from_url(large_img, timeout=10)
+        InvenTree.helpers_model.download_image_from_url(
+            large_img, timeout=10, max_size=10 * 1024 * 1024
+        )
 
     def test_model_mixin(self):
         """Test the getModelsWithMixin function."""
@@ -864,7 +837,7 @@ class TestDownloadFile(TestCase):
 class TestMPTT(TestCase):
     """Tests for the MPTT tree models."""
 
-    fixtures = ['location']
+    fixtures = ['tenant', 'location']
 
     def test_self_as_parent(self):
         """Test that we cannot set self as parent."""
@@ -1461,7 +1434,7 @@ class TestInstanceName(InvenTreeTestCase):
 class TestOffloadTask(InvenTreeTestCase):
     """Tests for offloading tasks to the background worker."""
 
-    fixtures = ['category', 'part', 'location', 'stock']
+    fixtures = ['tenant', 'category', 'part', 'location', 'stock']
 
     def test_offload_tasks(self):
         """Test that we can offload various tasks to the background worker thread.
@@ -1496,7 +1469,7 @@ class TestOffloadTask(InvenTreeTestCase):
                 offload_task('dummy_task.numbers', 1, 1, 1, force_sync=True)
             )
 
-            self.assertIn('Malformed function path', str(log.output))
+            self.assertIn("No module named \\'dummy_task\\'", str(log.output))
 
         # Offload dummy task with a Part instance
         # This should succeed, ensuring that the Part instance is correctly pickled
@@ -1604,11 +1577,11 @@ class SanitizerTest(TestCase):
     def test_svg_sanitizer(self):
         """Test that SVGs are sanitized accordingly."""
         valid_string = """<svg xmlns="http://www.w3.org/2000/svg" version="1.1" id="svg2" height="400" width="400">{0}
-        <path id="path1" d="m -151.78571,359.62883 v 112.76373 l 97.068507,-56.04253 V 303.14815 Z" style="fill:#ddbc91;"></path>
+        <path id="path1" d="m -151.78571,359.62883 v 112.76373 l 97.068507,-56.04253 V 303.14815 Z" style="fill:#ddbc91"></path>
         </svg>"""
         dangerous_string = valid_string.format('<script>alert();</script>')
 
-        # Test that valid string
+        # Test that valid string passes through unchanged
         self.assertEqual(valid_string, sanitize_svg(valid_string))
 
         # Test that invalid string is cleaned

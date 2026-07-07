@@ -6,6 +6,8 @@ import { type Control, type FieldValues, useController } from 'react-hook-form';
 
 import type { ApiFormFieldSet, ApiFormFieldType } from '@lib/types/Forms';
 import { IconFileUpload } from '@tabler/icons-react';
+import type { NavigateFunction } from 'react-router-dom';
+import DateTimeField from '../DateTimeField';
 import { BooleanField } from './BooleanField';
 import { ChoiceField } from './ChoiceField';
 import DateField from './DateField';
@@ -15,6 +17,7 @@ import { NestedObjectField } from './NestedObjectField';
 import NumberField from './NumberField';
 import { RelatedModelField } from './RelatedModelField';
 import { TableField } from './TableField';
+import TagsField from './TagsField';
 import TextField from './TextField';
 
 /**
@@ -25,6 +28,7 @@ export function ApiFormField({
   definition,
   control,
   hideLabels,
+  navigate,
   url,
   setFields,
   onKeyDown
@@ -33,6 +37,7 @@ export function ApiFormField({
   definition: ApiFormFieldType;
   control: Control<FieldValues, any>;
   hideLabels?: boolean;
+  navigate?: NavigateFunction | null;
   url?: string;
   setFields?: React.Dispatch<React.SetStateAction<ApiFormFieldSet>>;
   onKeyDown?: (value: any) => void;
@@ -63,7 +68,7 @@ export function ApiFormField({
           : definition.value
       );
     }
-  }, [definition.value]);
+  }, [definition.value, definition.field_type]);
 
   const fieldDefinition: ApiFormFieldType = useMemo(() => {
     return {
@@ -80,10 +85,15 @@ export function ApiFormField({
       ...fieldDefinition,
       autoFill: undefined,
       placeholderAutofill: undefined,
+      placeholderWarning: undefined,
+      placeholderWarningCompare: undefined,
+      singleFetchFunction: undefined,
       autoFillFilters: undefined,
       onValueChange: undefined,
       adjustFilters: undefined,
       adjustValue: undefined,
+      allow_blank: undefined,
+      allow_null: undefined,
       read_only: undefined,
       children: undefined,
       exclude: undefined
@@ -113,9 +123,10 @@ export function ApiFormField({
       case 'related field':
         return (
           <RelatedModelField
-            controller={controller}
             definition={fieldDefinition}
+            controller={controller}
             fieldName={fieldName}
+            navigate={navigate}
           />
         );
       case 'email':
@@ -161,9 +172,12 @@ export function ApiFormField({
           />
         );
       case 'date':
-      case 'datetime':
         return (
           <DateField controller={controller} definition={fieldDefinition} />
+        );
+      case 'datetime':
+        return (
+          <DateTimeField controller={controller} definition={fieldDefinition} />
         );
       case 'integer':
       case 'decimal':
@@ -175,6 +189,10 @@ export function ApiFormField({
             fieldName={fieldName}
             definition={reducedDefinition}
             placeholderAutofill={fieldDefinition.placeholderAutofill ?? false}
+            placeholderWarningCompare={
+              fieldDefinition.placeholderWarningCompare ?? undefined
+            }
+            placeholderWarning={fieldDefinition.placeholderWarning ?? undefined}
             onChange={(value: any) => {
               onChange(value);
             }}
@@ -231,6 +249,10 @@ export function ApiFormField({
             fieldName={fieldName}
             control={controller}
           />
+        );
+      case 'tags':
+        return (
+          <TagsField controller={controller} definition={fieldDefinition} />
         );
       default:
         return (

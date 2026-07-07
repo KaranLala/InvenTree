@@ -60,10 +60,10 @@ class TransitionMethod:
             **kwargs: Additional keyword arguments for custom logic.
 
         Returns:
-            result: bool - True if the transition method was successful, False otherwise.
+            result: bool - True if the transition method was successful (and no further transitions are attempted), False otherwise.
 
         Raises:
-            ValidationError: Alert the user that the transition failued
+            ValidationError: Alert the user that the transition failed
         """
         raise NotImplementedError(
             'TransitionMethod.transition must be implemented'

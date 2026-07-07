@@ -25,12 +25,12 @@ import Split from '@uiw/react-split';
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { Boundary } from '@lib/components/Boundary';
 import { ModelInformationDict } from '@lib/enums/ModelInformation';
 import { ModelType } from '@lib/enums/ModelType';
 import { apiUrl } from '@lib/functions/Api';
 import { api } from '../../../App';
 import type { TemplateI } from '../../../tables/settings/TemplateTable';
-import { Boundary } from '../../Boundary';
 import { SplitButton } from '../../buttons/SplitButton';
 import { StandaloneField } from '../../forms/StandaloneField';
 
@@ -223,7 +223,7 @@ export function TemplateEditor(props: Readonly<TemplateEditorProps>) {
           });
         })
         .catch((error) => {
-          const msg = error?.message;
+          const msg = error?.message || error?.toString();
 
           if (msg) {
             if (Array.isArray(msg)) {
@@ -272,7 +272,7 @@ export function TemplateEditor(props: Readonly<TemplateEditorProps>) {
   return (
     <Boundary label='TemplateEditor'>
       <Stack style={{ height: '100%', flex: '1' }}>
-        <Split style={{ gap: '10px' }}>
+        <Split visible style={{ flex: 1 }}>
           <Tabs
             value={editorValue}
             onChange={async (v) => {
@@ -282,7 +282,7 @@ export function TemplateEditor(props: Readonly<TemplateEditorProps>) {
             keepMounted={false}
             style={{
               minWidth: '300px',
-              flex: '1',
+              width: '50%',
               display: 'flex',
               flexDirection: 'column'
             }}
@@ -348,6 +348,7 @@ export function TemplateEditor(props: Readonly<TemplateEditorProps>) {
             keepMounted={false}
             style={{
               minWidth: '200px',
+              width: '50%',
               display: 'flex',
               flexDirection: 'column'
             }}
