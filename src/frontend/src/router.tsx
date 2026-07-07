@@ -134,6 +134,9 @@ export const FzLayout = Loadable(
 export const FzSalesOrderList = Loadable(
   lazy(() => import('./fz/pages/so/FzSalesOrderList'))
 );
+export const FzSalesOrderDetail = Loadable(
+  lazy(() => import('./fz/pages/so/FzSalesOrderDetail'))
+);
 export const FzPurchaseOrderList = Loadable(
   lazy(() => import('./fz/pages/po/FzPurchaseOrderList'))
 );
@@ -170,6 +173,7 @@ export const routes = (
     <Route path='/b' element={<FzLayout />} errorElement={<ErrorPage />}>
       <Route index element={<Navigate to='so/' replace />} />
       <Route path='so/' element={<FzSalesOrderList />} />
+      <Route path='so/:id' element={<FzSalesOrderDetail />} />
       <Route path='po/' element={<FzPurchaseOrderList />} />
       <Route path='stock/' element={<FzStock />} />
     </Route>
