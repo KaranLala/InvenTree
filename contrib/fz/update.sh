@@ -21,8 +21,11 @@ set -euo pipefail
 REPO_DIR=/home/ec2-user/inventree/src
 GH_REPO=KaranLala/InvenTree
 WORKFLOW="FZ Frontend Build"
-INV="$REPO_DIR/env/bin/inv"
 FRONTEND_DEST="$REPO_DIR/src/backend/InvenTree/web/static/web"
+
+# Put the virtualenv first on PATH. tasks.py shells out to bare `pip3` and
+# `python3`, so without this the system Python is used instead of the venv.
+export PATH="$REPO_DIR/env/bin:$PATH"
 
 cd "$REPO_DIR" || { echo "Directory not found: $REPO_DIR"; exit 1; }
 
@@ -70,11 +73,11 @@ fi
 
 # --- Backend update (install, backup, migrate, collectstatic) ---
 echo "Running inv fz-updateServer..."
-"$INV" fz-updateServer
+inv fz-updateServer
 
 # --- Backend translations (.mo files are not in git) ---
 echo "Compiling backend translations..."
-"$INV" int.backend-compilemessages
+inv int.backend-compilemessages
 
 # --- Restart services ---
 echo "Restarting inventree-server..."
