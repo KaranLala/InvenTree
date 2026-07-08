@@ -43,11 +43,10 @@ class PluginAppConfig(AppConfig):
             logger.info('Loading InvenTree plugins')
 
             if not registry.is_ready:
-                # Mark the registry as ready
-                # This ensures that other apps cannot access the registry before it is fully initialized
+                # Initialize the process-wide registry only once. Database-specific
+                # synchronization is handled by the relevant runtime boundary.
                 logger.info('Plugin registry is ready - performing initial load')
                 registry.set_ready()
 
-                # drop out of maintenance
-                # makes sure we did not have an error in reloading and maintenance is still active
+                # Drop out of maintenance after a successful initial load.
                 set_maintenance_mode(False)

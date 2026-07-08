@@ -88,6 +88,10 @@ export const ReturnOrderDetail = Loadable(
   lazy(() => import('./pages/sales/ReturnOrderDetail'))
 );
 
+export const TransferOrderDetail = Loadable(
+  lazy(() => import('./pages/stock/TransferOrderDetail'))
+);
+
 export const Scan = Loadable(lazy(() => import('./pages/Index/Scan')));
 
 export const ErrorPage = Loadable(lazy(() => import('./pages/ErrorPage')));
@@ -121,6 +125,35 @@ export const NotFound = Loadable(
   lazy(() => import('./components/errors/NotFound'))
 );
 
+// FZ app (streamlined branch-scoped UI)
+export const FzLayout = Loadable(
+  lazy(() => import('./fz/FzLayout')),
+  true,
+  true
+);
+export const FzSalesOrderList = Loadable(
+  lazy(() => import('./fz/pages/so/FzSalesOrderList'))
+);
+export const FzSalesOrderDetail = Loadable(
+  lazy(() => import('./fz/pages/so/FzSalesOrderDetail'))
+);
+export const FzPurchaseOrderList = Loadable(
+  lazy(() => import('./fz/pages/po/FzPurchaseOrderList'))
+);
+export const FzPurchaseOrderDetail = Loadable(
+  lazy(() => import('./fz/pages/po/FzPurchaseOrderDetail'))
+);
+export const FzStock = Loadable(lazy(() => import('./fz/pages/stock/FzStock')));
+export const FzItemMaster = Loadable(
+  lazy(() => import('./fz/pages/items/FzItemMaster'))
+);
+export const FzCompanyList = Loadable(
+  lazy(() => import('./fz/pages/companies/FzCompanyList'))
+);
+export const FzCompanyDetail = Loadable(
+  lazy(() => import('./fz/pages/companies/FzCompanyDetail'))
+);
+
 // Auth
 export const Login = Loadable(lazy(() => import('./pages/Auth/Login')));
 export const LoggedIn = Loadable(
@@ -149,8 +182,27 @@ export const VerifyEmail = Loadable(
 export const routes = (
   <Routes>
     <Route path='*' element={<NotFound />} errorElement={<ErrorPage />} />
+    <Route path='/b' element={<FzLayout />} errorElement={<ErrorPage />}>
+      <Route index element={<Navigate to='so/' replace />} />
+      <Route path='so/' element={<FzSalesOrderList />} />
+      <Route path='so/:id' element={<FzSalesOrderDetail />} />
+      <Route path='po/' element={<FzPurchaseOrderList />} />
+      <Route path='po/:id' element={<FzPurchaseOrderDetail />} />
+      <Route path='stock/' element={<FzStock />} />
+      <Route path='items/' element={<FzItemMaster />} />
+      <Route path='customers/' element={<FzCompanyList kind='customer' />} />
+      <Route
+        path='customers/:id'
+        element={<FzCompanyDetail kind='customer' />}
+      />
+      <Route path='suppliers/' element={<FzCompanyList kind='supplier' />} />
+      <Route
+        path='suppliers/:id'
+        element={<FzCompanyDetail kind='supplier' />}
+      />
+    </Route>
     <Route path='/' element={<LayoutComponent />} errorElement={<ErrorPage />}>
-      <Route index element={<Home />} />,
+      <Route index element={<Navigate to='/b/' replace />} />,
       <Route path='home/' element={<Home />} />,
       <Route path='notifications/*' element={<Notifications />} />,
       <Route path='scan/' element={<Scan />} />,
@@ -169,6 +221,7 @@ export const routes = (
         <Route index element={<Navigate to='location/index/' />} />
         <Route path='location/:id?/*' element={<LocationDetail />} />
         <Route path='item/:id/*' element={<StockDetail />} />
+        <Route path='transfer-order/:id/*' element={<TransferOrderDetail />} />
       </Route>
       <Route path='manufacturing/'>
         <Route index element={<Navigate to='index/' />} />

@@ -8,7 +8,7 @@ class TenantConfig(AppConfig):
 
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'tenant'
-    verbose_name = 'Tenant Management'
+    verbose_name = 'Branch Management'
 
     def ready(self):
         """This function is called whenever the Tenant app is loaded."""

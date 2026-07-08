@@ -24,18 +24,18 @@ import {
 } from '@tabler/icons-react';
 import { lazy, useMemo } from 'react';
 
+import { PluginPanelKey } from '@lib/enums/ModelType';
 import { UserRoles } from '@lib/enums/Roles';
+import type { PanelGroupType, PanelType } from '@lib/types/Panel';
 import PermissionDenied from '../../../../components/errors/PermissionDenied';
 import PageTitle from '../../../../components/nav/PageTitle';
 import { SettingsHeader } from '../../../../components/nav/SettingsHeader';
-import type {
-  PanelGroupType,
-  PanelType
-} from '../../../../components/panels/Panel';
 import { PanelGroup } from '../../../../components/panels/PanelGroup';
 import { GlobalSettingList } from '../../../../components/settings/SettingList';
 import { Loadable } from '../../../../functions/loading';
 import { useUserState } from '../../../../states/UserState';
+import ParameterTemplateTable from '../../../../tables/general/ParameterTemplateTable';
+import SelectionListTable from '../../../../tables/settings/SelectionListTable';
 
 const ReportTemplatePanel = Loadable(
   lazy(() => import('./ReportTemplatePanel'))
@@ -72,8 +72,6 @@ const PluginManagementPanel = Loadable(
 const MachineManagementPanel = Loadable(
   lazy(() => import('./MachineManagementPanel'))
 );
-
-const ParameterPanel = Loadable(lazy(() => import('./ParameterPanel')));
 
 const ErrorReportTable = Loadable(
   lazy(() => import('../../../../tables/settings/ErrorTable'))
@@ -184,7 +182,7 @@ export default function AdminCenter() {
       },
       {
         name: 'tenant',
-        label: t`Tenants`,
+        label: t`Branches`,
         icon: <IconBuilding />,
         content: <TenantManagementPanel />,
         hidden: !user.hasViewRole(UserRoles.admin)
@@ -216,7 +214,14 @@ export default function AdminCenter() {
         name: 'parameters',
         label: t`Parameters`,
         icon: <IconList />,
-        content: <ParameterPanel />,
+        content: <ParameterTemplateTable />,
+        hidden: !user.hasViewRole(UserRoles.part)
+      },
+      {
+        name: 'selection-lists',
+        label: t`Selection Lists`,
+        icon: <IconList />,
+        content: <SelectionListTable />,
         hidden: !user.hasViewRole(UserRoles.part)
       },
       {
@@ -298,6 +303,7 @@ export default function AdminCenter() {
         id: 'plm',
         label: t`PLM`,
         panelIDs: [
+          'selection-lists',
           'parameters',
           'category-parameters',
           'location-types',
@@ -327,8 +333,8 @@ export default function AdminCenter() {
             panels={adminCenterPanels}
             groups={grouping}
             collapsible={true}
-            model='admincenter'
-            id={null}
+            pluginPanelWithoutId
+            pluginPanelKey={PluginPanelKey.admincenter}
           />
         </Stack>
       ) : (

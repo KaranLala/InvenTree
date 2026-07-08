@@ -27,8 +27,8 @@ class Tenant(InvenTree.models.InvenTreeMetadataModel):
         """Meta options for Tenant."""
 
         app_label = 'tenant'
-        verbose_name = _('Tenant')
-        verbose_name_plural = _('Tenants')
+        verbose_name = _('Branch')
+        verbose_name_plural = _('Branches')
         ordering = ['name']
 
     @staticmethod
@@ -40,13 +40,13 @@ class Tenant(InvenTree.models.InvenTreeMetadataModel):
         max_length=100,
         unique=True,
         verbose_name=_('Name'),
-        help_text=_('Unique name for the tenant'),
+        help_text=_('Unique name for the branch'),
     )
 
     description = models.TextField(
         blank=True,
         verbose_name=_('Description'),
-        help_text=_('Optional description of the tenant'),
+        help_text=_('Optional description of the branch'),
     )
 
     code = models.CharField(
@@ -55,13 +55,13 @@ class Tenant(InvenTree.models.InvenTreeMetadataModel):
         blank=True,
         null=True,
         verbose_name=_('Code'),
-        help_text=_('Optional unique code/identifier for the tenant'),
+        help_text=_('Optional unique code/identifier for the branch'),
     )
 
     is_active = models.BooleanField(
         default=True,
         verbose_name=_('Active'),
-        help_text=_('Whether this tenant is currently active'),
+        help_text=_('Whether this branch is currently active'),
     )
 
     contact_name = models.CharField(
@@ -108,6 +108,6 @@ class TenantMixin(models.Model):
         Tenant,
         on_delete=models.CASCADE,
         related_name='%(class)s_set',
-        verbose_name=_('Tenant'),
-        help_text=_('Tenant this entity belongs to'),
+        verbose_name=_('Branch'),
+        help_text=_('Branch this entity belongs to'),
     )

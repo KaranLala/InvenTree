@@ -25,11 +25,14 @@ import type {
   ApiFormFieldSet,
   ApiFormFieldType
 } from '@lib/types/Forms';
+import dayjs from 'dayjs';
 import type { TableFieldRowProps } from '../components/forms/fields/TableField';
+import useBackgroundTask from '../hooks/UseBackgroundTask';
 import { useCreateApiFormModal, useEditApiFormModal } from '../hooks/UseForm';
 import { useGlobalSettingsState } from '../states/SettingsStates';
 import { useUserState } from '../states/UserState';
 import { RenderPartColumn } from '../tables/ColumnRenderers';
+import { TagsField } from './CommonFields';
 
 export function useSalesOrderFields({
   duplicateOrderId
@@ -45,6 +48,11 @@ export function useSalesOrderFields({
         filters: {
           is_customer: true,
           active: true
+        },
+        addCreateFields: {
+          name: {},
+          description: {},
+          is_customer: { value: true, hidden: true }
         }
       },
       customer_reference: {},
@@ -63,6 +71,7 @@ export function useSalesOrderFields({
       target_date: {
         icon: <IconCalendar />
       },
+      tags: TagsField({}),
       link: {},
       contact: {
         icon: <IconUser />,
@@ -96,7 +105,8 @@ export function useSalesOrderFields({
             value: duplicateOrderId
           },
           copy_lines: {},
-          copy_extra_lines: {}
+          copy_extra_lines: {},
+          copy_parameters: {}
         }
       };
     }
@@ -172,6 +182,7 @@ export function useSalesOrderLineItemFields({
         },
         onValueChange: (_: any, record?: any) => setPart(record)
       },
+      line: {},
       reference: {},
       quantity: {
         onValueChange: (value) => {
@@ -180,7 +191,9 @@ export function useSalesOrderLineItemFields({
       },
       sale_price: {
         placeholder: salePrice,
-        placeholderAutofill: true
+        placeholderAutofill: true,
+        placeholderWarningCompare: salePrice,
+        placeholderWarning: t`Price based on part and quantity differs${salePrice ? `; suggested: (${salePrice})` : '.'}`
       },
       sale_price_currency: {
         icon: <IconCoins />,
@@ -258,6 +271,45 @@ export function useUncheckShipmentForm({
     },
     successMessage: t`Shipment marked as unchecked`,
     onFormSuccess: onSuccess
+  });
+}
+
+export function useCompleteShipmentForm({
+  shipment,
+  onSuccess
+}: {
+  shipment: any;
+  onSuccess: () => void;
+}) {
+  const [taskId, setTaskId] = useState<string>('');
+
+  const completeShipmentFields = useSalesOrderShipmentCompleteFields({});
+
+  useBackgroundTask({
+    taskId: taskId,
+    message: t`Completing shipment`,
+    successMessage: t`Shipment completed successfully`,
+    onSuccess: onSuccess
+  });
+
+  return useCreateApiFormModal({
+    url: ApiEndpoints.sales_order_shipment_complete,
+    pk: shipment.pk,
+    title: t`Complete Shipment`,
+    fields: completeShipmentFields,
+    focus: 'tracking_number',
+    initialData: {
+      ...shipment,
+      shipment_date: dayjs().format('YYYY-MM-DD')
+    },
+    successMessage: null,
+    onFormSuccess: (response: any) => {
+      if (response.task_id) {
+        setTaskId(response.task_id);
+      } else {
+        onSuccess();
+      }
+    }
   });
 }
 
@@ -412,6 +464,7 @@ export function useAllocateToSalesOrderForm({
         }
       },
       shipment: {
+        autoFill: true,
         filters: {
           shipped: false,
           order_detail: true,
@@ -429,6 +482,7 @@ export function useAllocateToSalesOrderForm({
     onFormSuccess: onFormSuccess,
     successMessage: t`Stock items allocated`,
     size: '80%',
+    keepOpenOption: true,
     initialData: {
       items: lineItems.map((item) => {
         return {
@@ -492,6 +546,7 @@ export function useSalesOrderShipmentFields({
       },
       tracking_number: {},
       invoice_number: {},
+      tags: TagsField({}),
       link: {}
     };
   }, [customerId, pending]);
@@ -533,4 +588,29 @@ export function useSalesOrderAllocationFields({
       }
     };
   }, [orderId, shipment]);
+}
+
+export function useSalesOrderAutoAllocateFields({
+  orderId
+}: {
+  orderId: number;
+}): ApiFormFieldSet {
+  return useMemo(() => {
+    return {
+      location: {},
+      exclude_location: {},
+      interchangeable: {},
+      stock_sort_by: {},
+      serialized_stock: {},
+      shipment: {
+        filters: {
+          order: orderId,
+          shipped: false
+        }
+      },
+      line_items: {
+        hidden: true
+      }
+    };
+  }, [orderId]);
 }

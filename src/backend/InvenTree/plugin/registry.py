@@ -168,6 +168,22 @@ class PluginsRegistry:
         # Perform initial plugin discovery
         self.reload_plugins(full_reload=True, force_reload=True, collect=True)
 
+    def synchronize_database(self):
+        """Synchronize registry state with the active database.
+
+        This is used at lifecycle boundaries where the database behind the
+        configured connection has changed, such as after creating a test database.
+        """
+        self.errors = {}
+
+        if not self.is_ready:
+            self.set_ready()
+            return
+
+        self.reload_plugins(
+            full_reload=True, force_reload=True, collect=True, clear_errors=True
+        )
+
     @property
     def is_ready(self) -> bool:
         """Return True if the plugin registry is ready to be used."""
@@ -222,13 +238,18 @@ class PluginsRegistry:
         import InvenTree.ready
         from plugin.models import PluginConfig
 
-        if InvenTree.ready.isImportingData():
-            return None
+        # Under certain circumstances, we want to avoid creating new PluginConfig instances in the database
+        can_create = (
+            InvenTree.ready.canAppAccessDatabase(
+                allow_plugins=False, allow_shell=True, allow_test=True
+            )
+            and not InvenTree.ready.isReadOnlyCommand()
+        )
 
         try:
             cfg = PluginConfig.objects.filter(key=slug).first()
 
-            if not cfg:
+            if not cfg and can_create:
                 logger.debug(
                     "get_plugin_config: Creating new PluginConfig for '%s'", slug
                 )
@@ -315,12 +336,12 @@ class PluginsRegistry:
 
         configs = InvenTree.cache.get_session_cache(cache_key)
 
-        if not configs:
+        if configs is None:
             try:
                 # Pre-fetch the PluginConfig objects to avoid multiple database queries
                 from plugin.models import PluginConfig
 
-                plugin_configs = PluginConfig.objects.all()
+                plugin_configs = list(PluginConfig.objects.all())
                 configs = {config.key: config for config in plugin_configs}
                 InvenTree.cache.set_session_cache(cache_key, configs)
             except (ProgrammingError, OperationalError):
@@ -339,11 +360,13 @@ class PluginsRegistry:
             except MixinNotImplementedError:
                 continue
 
-            config = configs.get(plugin.slug) or plugin.plugin_config()
+            config = configs.get(plugin.slug)
 
-            # No config - cannot use this plugin
-            if not config:
-                continue
+            # If plugin has no config yet, treat it as inactive by default
+            if config is None:
+                from plugin.models import PluginConfig
+
+                config = PluginConfig(key=plugin.slug)
 
             if active is not None and active != config.is_active():
                 continue
@@ -473,12 +496,19 @@ class PluginsRegistry:
 
             # Ensure that each loaded plugin has a valid configuration object in the database
             for plugin in self.plugins.values():
-                config = self.get_plugin_config(plugin.slug)
+                if config := self.get_plugin_config(plugin.slug):
+                    # Ensure mandatory plugins are marked as active
+                    if config.is_mandatory() and not config.active:
+                        config.active = True
 
-                # Ensure mandatory plugins are marked as active
-                if config.is_mandatory() and not config.active:
-                    config.active = True
-                    config.save(no_reload=True)
+                        try:
+                            config.save(no_reload=True)
+                        except (OperationalError, ProgrammingError):
+                            # Database is not ready, cannot save config
+                            logger.warning(
+                                "Database not ready - cannot set mandatory flag for plugin '%s'",
+                                plugin.slug,
+                            )
 
         except Exception as e:
             logger.exception('Unexpected error during plugin reload: %s', e)
@@ -774,9 +804,9 @@ class PluginsRegistry:
                     f"Plugin '{p}' is not compatible with the current InvenTree version {v}"
                 )
                 if v := plg_i.MIN_VERSION:
-                    _msg += _(f'Plugin requires at least version {v}')  # type: ignore[unsupported-operator]
+                    _msg += _(f'Plugin requires at least version {v}')  # ty:ignore[unsupported-operator]
                 if v := plg_i.MAX_VERSION:
-                    _msg += _(f'Plugin requires at most version {v}')  # type: ignore[unsupported-operator]
+                    _msg += _(f'Plugin requires at most version {v}')  # ty:ignore[unsupported-operator]
                 # Log to error stack
                 log_registry_error(_msg, reference=f'{p}:init_plugin')
             else:
@@ -1015,7 +1045,11 @@ class PluginsRegistry:
         data = md5()
 
         # Hash for all loaded plugins
-        for slug, plug in self.plugins.items():
+        # Note: Sort by slug, so the hash is independent of discovery order.
+        # Different processes can discover the same plugins in a different
+        # order, and the hash must represent the registry *state*, not the
+        # iteration order of any particular process.
+        for slug, plug in sorted(self.plugins.items(), key=lambda item: item[0]):
             data.update(str(slug).encode())
             data.update(str(plug.name).encode())
             data.update(str(plug.version).encode())

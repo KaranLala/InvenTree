@@ -21,24 +21,25 @@ from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 from rest_framework.serializers import ValidationError
 
-import build.tasks
 import common.filters
 import common.settings
 import company.serializers
 import InvenTree.helpers
 import part.filters
 import part.serializers as part_serializers
+import stock.models as stock_models
 from common.settings import get_global_setting
 from generic.states.fields import InvenTreeCustomStatusSerializerMixin
 from InvenTree.mixins import DataImportExportSerializerMixin
 from InvenTree.serializers import (
+    CustomStatusSerializerMixin,
     FilterableSerializerMixin,
     InvenTreeDecimalField,
     InvenTreeModelSerializer,
+    InvenTreeTaggitSerializer,
     NotesFieldMixin,
-    enable_filter,
+    OptionalField,
 )
-from InvenTree.tasks import offload_task
 from stock.generators import generate_batch_code
 from stock.models import StockItem, StockLocation
 from stock.serializers import (
@@ -51,12 +52,13 @@ from users.serializers import OwnerSerializer, UserSerializer
 
 from .models import Build, BuildItem, BuildLine
 from .status_codes import BuildStatus
-from .tasks import consume_build_item, consume_build_line
 
 
 class BuildSerializer(
+    CustomStatusSerializerMixin,
     FilterableSerializerMixin,
     NotesFieldMixin,
+    InvenTreeTaggitSerializer,
     DataImportExportSerializerMixin,
     InvenTreeCustomStatusSerializerMixin,
     InvenTreeModelSerializer,
@@ -103,11 +105,13 @@ class BuildSerializer(
             'parameters',
             'priority',
             'level',
+            'tags',
         ]
         read_only_fields = [
             'completed',
             'creation_date',
-            'completion_data',
+            'issued_by',
+            'completion_date',
             'status',
             'status_text',
             'level',
@@ -117,15 +121,16 @@ class BuildSerializer(
 
     level = serializers.IntegerField(label=_('Build Level'), read_only=True)
 
-    status_text = serializers.CharField(source='get_status_display', read_only=True)
-
-    part_detail = enable_filter(
-        part_serializers.PartBriefSerializer(source='part', many=False, read_only=True),
-        True,
+    part_detail = OptionalField(
+        serializer_class=part_serializers.PartBriefSerializer,
+        serializer_kwargs={'source': 'part', 'many': False, 'read_only': True},
+        default_include=True,
         prefetch_fields=['part', 'part__category', 'part__pricing_data'],
     )
 
     parameters = common.filters.enable_parameters_filter()
+
+    tags = common.filters.enable_tags_filter()
 
     part_name = serializers.CharField(
         source='part.name', read_only=True, label=_('Part Name')
@@ -135,16 +140,22 @@ class BuildSerializer(
 
     overdue = serializers.BooleanField(read_only=True, default=False)
 
-    issued_by_detail = enable_filter(
-        UserSerializer(source='issued_by', read_only=True),
-        True,
+    issued_by_detail = OptionalField(
+        serializer_class=UserSerializer,
+        serializer_kwargs={'source': 'issued_by', 'read_only': True},
+        default_include=True,
         filter_name='user_detail',
         prefetch_fields=['issued_by'],
     )
 
-    responsible_detail = enable_filter(
-        OwnerSerializer(source='responsible', read_only=True, allow_null=True),
-        True,
+    responsible_detail = OptionalField(
+        serializer_class=OwnerSerializer,
+        serializer_kwargs={
+            'source': 'responsible',
+            'read_only': True,
+            'allow_null': True,
+        },
+        default_include=True,
         filter_name='user_detail',
         prefetch_fields=['responsible'],
     )
@@ -168,7 +179,8 @@ class BuildSerializer(
         queryset = queryset.annotate(
             overdue=Case(
                 When(
-                    Build.OVERDUE_FILTER, then=Value(True, output_field=BooleanField())
+                    Build.get_overdue_filter(),
+                    then=Value(True, output_field=BooleanField()),
                 ),
                 default=Value(False, output_field=BooleanField()),
             )
@@ -456,18 +468,6 @@ class BuildOutputDeleteSerializer(serializers.Serializer):
 
         return data
 
-    def save(self):
-        """'save' the serializer to delete the build outputs."""
-        data = self.validated_data
-        outputs = data.get('outputs', [])
-
-        build = self.context['build']
-
-        with transaction.atomic():
-            for item in outputs:
-                output = item['output']
-                build.delete_output(output)
-
 
 class BuildOutputScrapSerializer(serializers.Serializer):
     """Scrapping one or more build outputs."""
@@ -511,27 +511,6 @@ class BuildOutputScrapSerializer(serializers.Serializer):
             raise ValidationError(_('A list of build outputs must be provided'))
 
         return data
-
-    def save(self):
-        """Save the serializer to scrap the build outputs."""
-        build = self.context['build']
-        request = self.context.get('request')
-        data = self.validated_data
-        outputs = data.get('outputs', [])
-
-        # Scrap the build outputs
-        with transaction.atomic():
-            for item in outputs:
-                output = item['output']
-                quantity = item.get('quantity', None)
-                build.scrap_build_output(
-                    output,
-                    quantity,
-                    data.get('location', None),
-                    user=request.user if request else None,
-                    notes=data.get('notes', ''),
-                    discard_allocations=data.get('discard_allocations', False),
-                )
 
 
 class BuildOutputCompleteSerializer(serializers.Serializer):
@@ -603,42 +582,6 @@ class BuildOutputCompleteSerializer(serializers.Serializer):
             raise ValidationError(_('A list of build outputs must be provided'))
 
         return data
-
-    def save(self):
-        """Save the serializer to complete the build outputs."""
-        build = self.context['build']
-        request = self.context.get('request')
-
-        data = self.validated_data
-
-        location = data.get('location', None)
-        status = data.get('status_custom_key', StockStatus.OK.value)
-        notes = data.get('notes', '')
-
-        outputs = data.get('outputs', [])
-
-        # Cache some calculated values which can be passed to each output
-        required_tests = outputs[0]['output'].part.getRequiredTests()
-        prevent_on_incomplete = (
-            common.settings.prevent_build_output_complete_on_incompleted_tests()
-        )
-
-        # Mark the specified build outputs as "complete"
-        with transaction.atomic():
-            for item in outputs:
-                output = item['output']
-                quantity = item.get('quantity', None)
-
-                build.complete_build_output(
-                    output,
-                    request.user if request else None,
-                    quantity=quantity,
-                    location=location,
-                    status=status,
-                    notes=notes,
-                    required_tests=required_tests,
-                    prevent_on_incomplete=prevent_on_incomplete,
-                )
 
 
 class BuildIssueSerializer(serializers.Serializer):
@@ -1117,25 +1060,34 @@ class BuildAutoAllocationSerializer(serializers.Serializer):
         help_text=_('Allocate optional BOM items to build order'),
     )
 
-    def save(self):
-        """Perform the auto-allocation step."""
-        import InvenTree.tasks
+    item_type = serializers.ChoiceField(
+        default=Build.BuildItemTypes.UNTRACKED,
+        choices=[
+            (Build.BuildItemTypes.ALL, _('All Items')),
+            (Build.BuildItemTypes.UNTRACKED, _('Untracked Items')),
+            (Build.BuildItemTypes.TRACKED, _('Tracked Items')),
+        ],
+        label=_('Item Type'),
+        help_text=_('Select item type to auto-allocate'),
+    )
 
-        data = self.validated_data
+    stock_sort_by = serializers.ChoiceField(
+        default=stock_models.STOCK_SORT_DEFAULT,
+        choices=stock_models.STOCK_SORT_CHOICES,
+        label=_('Stock Priority'),
+        help_text=_('Preferred order in which matching stock items are consumed'),
+    )
 
-        build_order = self.context['build']
-
-        if not InvenTree.tasks.offload_task(
-            build.tasks.auto_allocate_build,
-            build_order.pk,
-            location=data.get('location', None),
-            exclude_location=data.get('exclude_location', None),
-            interchangeable=data['interchangeable'],
-            substitutes=data['substitutes'],
-            optional_items=data['optional_items'],
-            group='build',
-        ):
-            raise ValidationError(_('Failed to start auto-allocation task'))
+    build_lines = serializers.PrimaryKeyRelatedField(
+        queryset=BuildLine.objects.all(),
+        many=True,
+        required=False,
+        default=list,
+        label=_('Build Lines'),
+        help_text=_(
+            'Limit allocation to these build lines (leave blank to allocate all lines)'
+        ),
+    )
 
 
 class BuildItemSerializer(
@@ -1179,6 +1131,7 @@ class BuildItemSerializer(
             'part_detail',
             'stock_item_detail',
             'supplier_part_detail',
+            'install_into_detail',
             # The following fields are only used for data export
             'bom_reference',
             'bom_part_id',
@@ -1210,31 +1163,33 @@ class BuildItemSerializer(
     )
 
     # Extra (optional) detail fields
-    part_detail = enable_filter(
-        part_serializers.PartBriefSerializer(
-            label=_('Part'),
-            source='stock_item.part',
-            many=False,
-            read_only=True,
-            allow_null=True,
-            pricing=False,
-        ),
-        True,
+    part_detail = OptionalField(
+        serializer_class=part_serializers.PartBriefSerializer,
+        serializer_kwargs={
+            'label': _('Part'),
+            'source': 'stock_item.part',
+            'many': False,
+            'read_only': True,
+            'allow_null': True,
+            'pricing': False,
+        },
+        default_include=True,
         prefetch_fields=['stock_item__part'],
     )
 
-    stock_item_detail = enable_filter(
-        StockItemSerializer(
-            source='stock_item',
-            read_only=True,
-            allow_null=True,
-            label=_('Stock Item'),
-            part_detail=False,
-            location_detail=False,
-            supplier_part_detail=False,
-            path_detail=False,
-        ),
-        True,
+    stock_item_detail = OptionalField(
+        serializer_class=StockItemSerializer,
+        serializer_kwargs={
+            'source': 'stock_item',
+            'read_only': True,
+            'allow_null': True,
+            'label': _('Stock Item'),
+            'part_detail': False,
+            'location_detail': False,
+            'supplier_part_detail': False,
+            'path_detail': False,
+        },
+        default_include=True,
         filter_name='stock_detail',
         prefetch_fields=[
             'stock_item',
@@ -1244,30 +1199,48 @@ class BuildItemSerializer(
         ],
     )
 
+    install_into_detail = OptionalField(
+        serializer_class=StockItemSerializer,
+        serializer_kwargs={
+            'source': 'install_into',
+            'read_only': True,
+            'allow_null': True,
+            'label': _('Install Into'),
+            'part_detail': False,
+            'location_detail': False,
+            'supplier_part_detail': False,
+            'path_detail': False,
+        },
+        default_include=False,
+        prefetch_fields=['install_into', 'install_into__part'],
+    )
+
     location = serializers.PrimaryKeyRelatedField(
         label=_('Location'), source='stock_item.location', many=False, read_only=True
     )
 
-    location_detail = enable_filter(
-        LocationBriefSerializer(
-            label=_('Location'),
-            source='stock_item.location',
-            read_only=True,
-            allow_null=True,
-        ),
-        True,
+    location_detail = OptionalField(
+        serializer_class=LocationBriefSerializer,
+        serializer_kwargs={
+            'label': _('Location'),
+            'source': 'stock_item.location',
+            'read_only': True,
+            'allow_null': True,
+        },
+        default_include=True,
         prefetch_fields=['stock_item__location'],
     )
 
-    build_detail = enable_filter(
-        BuildSerializer(
-            label=_('Build'),
-            source='build_line.build',
-            many=False,
-            read_only=True,
-            allow_null=True,
-        ),
-        True,
+    build_detail = OptionalField(
+        serializer_class=BuildSerializer,
+        serializer_kwargs={
+            'label': _('Build'),
+            'source': 'build_line.build',
+            'many': False,
+            'read_only': True,
+            'allow_null': True,
+        },
+        default_include=True,
         prefetch_fields=[
             'build_line__build',
             'build_line__build__part',
@@ -1278,16 +1251,17 @@ class BuildItemSerializer(
         ],
     )
 
-    supplier_part_detail = enable_filter(
-        company.serializers.SupplierPartSerializer(
-            label=_('Supplier Part'),
-            source='stock_item.supplier_part',
-            many=False,
-            read_only=True,
-            allow_null=True,
-            brief=True,
-        ),
-        False,
+    supplier_part_detail = OptionalField(
+        serializer_class=company.serializers.SupplierPartSerializer,
+        serializer_kwargs={
+            'label': _('Supplier Part'),
+            'source': 'stock_item.supplier_part',
+            'many': False,
+            'read_only': True,
+            'allow_null': True,
+            'brief': True,
+        },
+        default_include=False,
         prefetch_fields=[
             'stock_item__supplier_part',
             'stock_item__supplier_part__supplier',
@@ -1377,9 +1351,15 @@ class BuildLineSerializer(
         read_only=True,
     )
 
-    allocations = enable_filter(
-        BuildItemSerializer(many=True, read_only=True, build_detail=False),
-        True,
+    allocations = OptionalField(
+        serializer_class=BuildItemSerializer,
+        serializer_kwargs={
+            'many': True,
+            'read_only': True,
+            'allow_null': True,
+            'build_detail': False,
+        },
+        default_include=True,
         prefetch_fields=[
             'allocations',
             'allocations__stock_item',
@@ -1420,71 +1400,79 @@ class BuildLineSerializer(
     bom_item = serializers.PrimaryKeyRelatedField(label=_('BOM Item'), read_only=True)
 
     # Foreign key fields
-    bom_item_detail = enable_filter(
-        part_serializers.BomItemSerializer(
-            label=_('BOM Item'),
-            source='bom_item',
-            many=False,
-            read_only=True,
-            pricing=False,
-            substitutes=False,
-            sub_part_detail=False,
-            part_detail=False,
-            can_build=False,
-        ),
-        False,
+    bom_item_detail = OptionalField(
+        serializer_class=part_serializers.BomItemSerializer,
+        serializer_kwargs={
+            'label': _('BOM Item'),
+            'source': 'bom_item',
+            'many': False,
+            'read_only': True,
+            'allow_null': True,
+            'pricing': False,
+            'substitutes': False,
+            'sub_part_detail': False,
+            'part_detail': False,
+            'can_build': False,
+        },
+        default_include=False,
         prefetch_fields=['bom_item'],
     )
 
-    assembly_detail = enable_filter(
-        part_serializers.PartBriefSerializer(
-            label=_('Assembly'),
-            source='bom_item.part',
-            many=False,
-            read_only=True,
-            allow_null=True,
-            pricing=False,
-        ),
-        False,
+    assembly_detail = OptionalField(
+        serializer_class=part_serializers.PartBriefSerializer,
+        serializer_kwargs={
+            'label': _('Assembly'),
+            'source': 'bom_item.part',
+            'many': False,
+            'read_only': True,
+            'allow_null': True,
+            'pricing': False,
+        },
+        default_include=False,
         prefetch_fields=['bom_item__part', 'bom_item__part__pricing_data'],
     )
 
-    part_detail = enable_filter(
-        part_serializers.PartBriefSerializer(
-            label=_('Part'),
-            source='bom_item.sub_part',
-            many=False,
-            read_only=True,
-            pricing=False,
-        ),
-        False,
+    part_detail = OptionalField(
+        serializer_class=part_serializers.PartBriefSerializer,
+        serializer_kwargs={
+            'label': _('Part'),
+            'source': 'bom_item.sub_part',
+            'many': False,
+            'read_only': True,
+            'allow_null': True,
+            'pricing': False,
+        },
+        default_include=False,
         prefetch_fields=['bom_item__sub_part', 'bom_item__sub_part__pricing_data'],
     )
 
-    category_detail = enable_filter(
-        part_serializers.CategorySerializer(
-            label=_('Category'),
-            source='bom_item.sub_part.category',
-            many=False,
-            read_only=True,
-            allow_null=True,
-        ),
-        False,
+    category_detail = OptionalField(
+        serializer_class=part_serializers.CategorySerializer,
+        serializer_kwargs={
+            'label': _('Category'),
+            'source': 'bom_item.sub_part.category',
+            'many': False,
+            'read_only': True,
+            'allow_null': True,
+            'path_detail': False,
+        },
+        default_include=False,
         prefetch_fields=['bom_item__sub_part__category'],
     )
 
-    build_detail = enable_filter(
-        BuildSerializer(
-            label=_('Build'),
-            source='build',
-            many=False,
-            read_only=True,
-            allow_null=True,
-            part_detail=False,
-            user_detail=False,
-            project_code_detail=False,
-        ),
-        True,
+    build_detail = OptionalField(
+        serializer_class=BuildSerializer,
+        serializer_kwargs={
+            'label': _('Build'),
+            'source': 'build',
+            'many': False,
+            'read_only': True,
+            'allow_null': True,
+            'part_detail': False,
+            'user_detail': False,
+            'project_code_detail': False,
+        },
+        default_include=True,
     )
 
     # Annotated (calculated) fields
@@ -1814,46 +1802,3 @@ class BuildConsumeSerializer(serializers.Serializer):
             raise ValidationError(_('At least one item or line must be provided'))
 
         return data
-
-    @transaction.atomic
-    def save(self):
-        """Perform the stock consumption step."""
-        data = self.validated_data
-        request = self.context.get('request')
-        notes = data.get('notes', '')
-
-        # We may be passed either a list of BuildItem or BuildLine instances
-        items = data.get('items', [])
-        lines = data.get('lines', [])
-
-        with transaction.atomic():
-            # Process the provided BuildItem objects
-            for item in items:
-                build_item = item['build_item']
-                quantity = item['quantity']
-
-                if build_item.install_into:
-                    # If the build item is tracked into an output, we do not consume now
-                    # Instead, it gets consumed when the output is completed
-                    continue
-
-                # Offload a background task to consume this BuildItem
-                offload_task(
-                    consume_build_item,
-                    build_item.pk,
-                    quantity,
-                    notes=notes,
-                    user_id=request.user.pk if request else None,
-                )
-
-            # Process the provided BuildLine objects
-            for line in lines:
-                build_line = line['build_line']
-
-                # Offload a background task to consume this BuildLine
-                offload_task(
-                    consume_build_line,
-                    build_line.pk,
-                    notes=notes,
-                    user_id=request.user.pk if request else None,
-                )

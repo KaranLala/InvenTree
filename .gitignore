@@ -122,3 +122,6 @@ InvenTree/web/static
 
 # performance test results
 .codspeed/
+
+# Claude Code local worktrees
+.claude/worktrees

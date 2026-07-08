@@ -25,6 +25,8 @@ export enum ModelType {
   salesordershipment = 'salesordershipment',
   returnorder = 'returnorder',
   returnorderlineitem = 'returnorderlineitem',
+  transferorder = 'transferorder',
+  transferorderlineitem = 'transferorderlineitem',
   importsession = 'importsession',
   address = 'address',
   contact = 'contact',
@@ -36,5 +38,20 @@ export enum ModelType {
   pluginconfig = 'pluginconfig',
   contenttype = 'contenttype',
   selectionlist = 'selectionlist',
-  error = 'error'
+  selectionentry = 'selectionentry',
+  error = 'error',
+  tag = 'tag'
+}
+
+export enum PluginPanelKey {
+  // settings / admin
+  admincenter = 'admincenter',
+  systemsettings = 'systemsettings',
+  usersettings = 'usersettings',
+  // generic
+  core = 'core',
+  // landing pages
+  purchasing = 'purchasing',
+  sales = 'sales',
+  manufacturing = 'manufacturing'
 }

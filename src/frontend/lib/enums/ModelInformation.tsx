@@ -10,6 +10,7 @@ export interface ModelInformationInterface {
   url_detail?: string;
   api_endpoint: ApiEndpoints;
   admin_url?: string;
+  pk_field?: string;
   supports_barcode?: boolean;
   icon: keyof InvenTreeIconType;
 }
@@ -117,8 +118,8 @@ export const ModelInformationDict: ModelDict = {
     icon: 'history'
   },
   build: {
-    label: () => t`Build`,
-    label_multiple: () => t`Builds`,
+    label: () => t`Build Order`,
+    label_multiple: () => t`Build Orders`,
     url_overview: '/manufacturing/index/buildorders/',
     url_detail: '/manufacturing/build-order/:pk/',
     api_endpoint: ApiEndpoints.build_order_list,
@@ -186,6 +187,7 @@ export const ModelInformationDict: ModelDict = {
     label_multiple: () => t`Sales Order Shipments`,
     url_overview: '/sales/index/shipments',
     url_detail: '/sales/shipment/:pk/',
+    admin_url: '/order/salesordershipment/',
     api_endpoint: ApiEndpoints.sales_order_shipment_list,
     supports_barcode: true,
     icon: 'shipment'
@@ -205,6 +207,22 @@ export const ModelInformationDict: ModelDict = {
     label_multiple: () => t`Return Order Line Items`,
     api_endpoint: ApiEndpoints.return_order_line_list,
     icon: 'return_orders'
+  },
+  transferorder: {
+    label: () => t`Transfer Order`,
+    label_multiple: () => t`Transfer Orders`,
+    url_overview: '/stock/location/index/transfer-orders',
+    url_detail: '/stock/transfer-order/:pk/',
+    api_endpoint: ApiEndpoints.transfer_order_list,
+    admin_url: '/order/transferorder/',
+    supports_barcode: true,
+    icon: 'transfer_orders'
+  },
+  transferorderlineitem: {
+    label: () => t`Transfer Order Line Item`,
+    label_multiple: () => t`Transfer Order Line Items`,
+    api_endpoint: ApiEndpoints.transfer_order_line_list,
+    icon: 'transfer-orders'
   },
   address: {
     label: () => t`Address`,
@@ -287,6 +305,13 @@ export const ModelInformationDict: ModelDict = {
     api_endpoint: ApiEndpoints.selectionlist_list,
     icon: 'list_details'
   },
+  selectionentry: {
+    label: () => t`Selection Entry`,
+    label_multiple: () => t`Selection Entries`,
+    url_overview: '/settings/admin/part-parameters',
+    api_endpoint: ApiEndpoints.selectionentry_list,
+    icon: 'list_details'
+  },
   error: {
     label: () => t`Error`,
     label_multiple: () => t`Errors`,
@@ -296,10 +321,16 @@ export const ModelInformationDict: ModelDict = {
     icon: 'exclamation'
   },
   tenant: {
-    label: () => t`Tenant`,
-    label_multiple: () => t`Tenants`,
+    label: () => t`Branch`,
+    label_multiple: () => t`Branches`,
     api_endpoint: ApiEndpoints.tenant_list,
     url_detail: '/tenant/:pk/',
     icon: 'building'
+  },
+  tag: {
+    label: () => t`Tag`,
+    label_multiple: () => t`Tags`,
+    api_endpoint: ApiEndpoints.tag_list,
+    icon: 'tag'
   }
 };

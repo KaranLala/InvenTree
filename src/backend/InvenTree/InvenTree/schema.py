@@ -55,9 +55,17 @@ class ExtendedAutoSchema(AutoSchema):
         result_id = super().get_operation_id()
 
         # rename bulk actions to deconflict with single action operation_id
-        if (self.method == 'DELETE' and self.is_bulk_action('BulkDeleteMixin')) or (
-            (self.method == 'PUT' or self.method == 'PATCH')
-            and self.is_bulk_action('BulkUpdateMixin')
+        if (
+            (self.method == 'DELETE' and self.is_bulk_action('BulkDeleteMixin'))
+            or (
+                self.method == 'DELETE'
+                and self.is_bulk_action('BulkDeleteViewsetMixin')
+                and self.view.action == 'bulk_delete'
+            )
+            or (
+                (self.method == 'PUT' or self.method == 'PATCH')
+                and self.is_bulk_action('BulkUpdateMixin')
+            )
         ):
             action = self.method_mapping[self.method.lower()]
             result_id = result_id.replace(action, 'bulk_' + action)
@@ -81,7 +89,11 @@ class ExtendedAutoSchema(AutoSchema):
 
         # drf-spectacular doesn't support a body on DELETE endpoints because the semantics are not well-defined and
         # OpenAPI recommends against it. This allows us to generate a schema that follows existing behavior.
-        if self.method == 'DELETE' and self.is_bulk_action('BulkDeleteMixin'):
+        if (self.method == 'DELETE' and self.is_bulk_action('BulkDeleteMixin')) or (
+            self.method == 'DELETE'
+            and getattr(self.view, 'action', None) == 'bulk_delete'
+            and self.is_bulk_action('BulkDeleteViewsetMixin')
+        ):
             original_method = self.method
             self.method = 'PUT'
             request_body = self._get_request_body()
@@ -89,12 +101,13 @@ class ExtendedAutoSchema(AutoSchema):
             operation['requestBody'] = request_body
             self.method = original_method
 
+        parameters = operation.get('parameters', [])
+
         # If pagination limit is not set (default state) then all results will return unpaginated. This doesn't match
         # what the schema defines to be the expected result. This forces limit to be present, producing the expected
         # type.
         pagination_class = getattr(self.view, 'pagination_class', None)
         if pagination_class and pagination_class == LimitOffsetPagination:
-            parameters = operation.get('parameters', [])
             for parameter in parameters:
                 if parameter['name'] == 'limit':
                     parameter['required'] = True
@@ -102,7 +115,6 @@ class ExtendedAutoSchema(AutoSchema):
         # Add valid order selections to the ordering field description.
         ordering_fields = getattr(self.view, 'ordering_fields', None)
         if ordering_fields is not None:
-            parameters = operation.get('parameters', [])
             for parameter in parameters:
                 if parameter['name'] == 'ordering':
                     schema_order = []
@@ -117,8 +129,6 @@ class ExtendedAutoSchema(AutoSchema):
         if search_fields is not None:
             # Ensure consistent ordering of search fields
             search_fields = sorted(search_fields)
-
-            parameters = operation.get('parameters', [])
             for parameter in parameters:
                 if parameter['name'] == 'search':
                     parameter['description'] = (
@@ -135,7 +145,56 @@ class ExtendedAutoSchema(AutoSchema):
             schema['items'] = {'$ref': schema['$ref']}
             del schema['$ref']
 
+        # Add vendor extensions for custom behavior
+        operation.update(self.get_inventree_extensions())
+
         return operation
+
+    def get_inventree_extensions(self):
+        """Add InvenTree specific extensions to the schema."""
+        from rest_framework.generics import RetrieveAPIView
+        from rest_framework.mixins import RetrieveModelMixin, UpdateModelMixin
+
+        from data_exporter.mixins import DataExportViewMixin
+        from InvenTree.api import BulkOperationMixin
+        from InvenTree.mixins import CleanMixin
+
+        lvl = settings.SCHEMA_VENDOREXTENSION_LEVEL
+        """Level of detail for InvenTree extensions."""
+
+        if lvl == 0:
+            return {}
+
+        mro = self.view.__class__.__mro__
+
+        data = {}
+        if lvl >= 1:
+            data['x-inventree-meta'] = {
+                'version': '1.0',
+                'is_detail': any(
+                    a in mro
+                    for a in [RetrieveModelMixin, UpdateModelMixin, RetrieveAPIView]
+                ),
+                'is_bulk': BulkOperationMixin in mro,
+                'is_cleaned': CleanMixin in mro,
+                'is_filtered': hasattr(self.view, 'output_options'),
+                'is_exported': DataExportViewMixin in mro,
+            }
+        if lvl >= 2:
+            data['x-inventree-components'] = [str(a) for a in mro]
+            try:
+                qs = self.view.get_queryset()
+                qs = qs.model if qs is not None and hasattr(qs, 'model') else None
+            except Exception:
+                qs = None
+
+            data['x-inventree-model'] = {
+                'scope': 'core',
+                'model': str(qs.__name__) if qs else None,
+                'app': str(qs._meta.app_label) if qs else None,
+            }
+
+        return data
 
 
 def postprocess_schema_enums(result, generator, **kwargs):
@@ -223,7 +282,7 @@ def postprocess_print_stats(result, generator, request, public):
     scopes = {}
     for path, details in rlt_dict.items():
         if details['oauth']:
-            for scope in details['oauth']:
+            for scope in list(details['oauth']):
                 if scope not in scopes:
                     scopes[scope] = []
                 scopes[scope].append(path)
@@ -282,3 +341,24 @@ def schema_for_view_output_options(view_class):
         view_class
     )
     return extended_view
+
+
+def exclude_from_schema(klass: type[Any], alternative_path: str) -> type[Any]:
+    """Decorator to exclude a view from the OpenAPI schema.
+
+    This is used to hide legacy endpoints from the schema, while still retaining them for backwards compatibility.
+    """
+
+    class LegacyView(klass):
+        """Dummy doc."""
+
+    LegacyView.__name__ = klass.__name__ + ' - Legacy'
+    LegacyView.__doc__ = f'This is a legacy endpoint, retained for backwards compatibility. Consider migrating to the new endpoint under {alternative_path}.'
+
+    # Exclude all default operations from the schema
+    for operation in ['get', 'post', 'put', 'patch', 'delete']:
+        if hasattr(klass, operation):
+            LegacyView = extend_schema_view(**{operation: extend_schema(exclude=True)})(
+                LegacyView
+            )
+    return LegacyView

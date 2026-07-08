@@ -23,14 +23,12 @@ class TenantSerializerMixin(serializers.Serializer):
 
     tenant = serializers.PrimaryKeyRelatedField(
         queryset=Tenant.objects.all(),
-        allow_null=False,
-        required=True,
-        label='Tenant',
-        help_text='Tenant this entity belongs to',
+        label='Branch',
+        help_text='Branch this entity belongs to',
     )
 
     tenant_detail = serializers.SerializerMethodField(
-        read_only=True, label='Tenant Detail'
+        read_only=True, label='Branch Detail'
     )
 
     def get_tenant_detail(self, obj):

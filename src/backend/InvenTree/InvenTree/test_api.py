@@ -69,7 +69,7 @@ class HTMLAPITests(InvenTreeTestCase):
 class ApiAccessTests(InvenTreeAPITestCase):
     """Tests for various access scenarios with the InvenTree API."""
 
-    fixtures = ['location', 'category', 'part', 'stock']
+    fixtures = ['tenant', 'location', 'category', 'part', 'stock']
     roles = ['part.view']
     token = None
     auto_login = False
@@ -278,8 +278,7 @@ class BulkDeleteTests(InvenTreeAPITestCase):
         response = self.delete(url, {}, expected_code=400)
 
         self.assertIn(
-            'List of items or filters must be provided for bulk operation',
-            str(response.data),
+            'List of items must be provided for bulk operation', str(response.data)
         )
 
         # DELETE with invalid 'items'
@@ -287,16 +286,12 @@ class BulkDeleteTests(InvenTreeAPITestCase):
 
         self.assertIn('Items must be provided as a list', str(response.data))
 
-        # DELETE with invalid 'filters'
-        response = self.delete(url, {'filters': [1, 2, 3]}, expected_code=400)
-
-        self.assertIn('Filters must be provided as a dict', str(response.data))
-
 
 class SearchTests(InvenTreeAPITestCase):
     """Unit tests for global search endpoint."""
 
     fixtures = [
+        'tenant',
         'category',
         'part',
         'company',
@@ -574,7 +569,7 @@ class GeneralApiTests(InvenTreeAPITestCase):
 
             self.assertIn('License file not found at', str(log.output))
 
-        with TemporaryDirectory() as tmp:  # type: ignore[no-matching-overload]
+        with TemporaryDirectory() as tmp:
             sample_file = Path(tmp, 'temp.txt')
             sample_file.write_text('abc', 'utf-8')
 
@@ -618,6 +613,7 @@ class GeneralApiTests(InvenTreeAPITestCase):
         response = self.get(
             url, headers={'Authorization': f'Token {token}'}, max_query_count=20
         )
+        self.assertIsNotNone(data.get('active_plugins'))
         self.assertGreater(len(response.json()['database']), 4)
 
         data = response.json()

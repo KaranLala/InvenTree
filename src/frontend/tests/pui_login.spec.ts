@@ -1,6 +1,6 @@
 import { expect, test } from './baseFixtures.js';
-import { logoutUrl } from './defaults.js';
-import { navigate } from './helpers.js';
+import { logoutUrl, noaccessuser } from './defaults.js';
+import { navigate, openDetailAction } from './helpers.js';
 import { doLogin } from './login.js';
 
 import { TOTP } from 'otpauth';
@@ -13,7 +13,8 @@ test('Login - Failures', async ({ page }) => {
     await page.getByRole('button', { name: 'Log In' }).click();
     await page.getByText('Login failed', { exact: true }).waitFor();
     await page.getByText('Check your input and try again').first().waitFor();
-    await page.locator('#login').getByRole('button').click();
+
+    await page.reload();
   };
 
   // Navigate to the 'login' page
@@ -48,14 +49,13 @@ test('Login - Failures', async ({ page }) => {
 
 test('Login - Change Password', async ({ page }) => {
   await doLogin(page, {
-    username: 'noaccess',
-    password: 'youshallnotpass'
+    user: noaccessuser
   });
 
   // Navigate to the 'change password' page
   await navigate(page, 'settings/user/account', { waitUntil: 'networkidle' });
-  await page.getByLabel('action-menu-account-actions').click();
-  await page.getByLabel('action-menu-account-actions-change-password').click();
+
+  await openDetailAction(page, 'account', 'change-password');
 
   // First attempt with some errors
   await page.getByLabel('password', { exact: true }).fill('youshallnotpass');
@@ -90,8 +90,7 @@ test('Login - Change Password', async ({ page }) => {
 // Tests for assigning MFA tokens to users
 test('Login - MFA - TOTP', async ({ page }) => {
   await doLogin(page, {
-    username: 'noaccess',
-    password: 'youshallnotpass'
+    user: noaccessuser
   });
 
   await navigate(page, 'settings/user/security', { waitUntil: 'networkidle' });

@@ -1,5 +1,11 @@
 import type { Browser, Page } from '@playwright/test';
-import { loginUrl, logoutUrl, user, webUrl } from './defaults';
+import {
+  type UserType,
+  allaccessuser,
+  homeUrl,
+  loginUrl,
+  logoutUrl
+} from './defaults';
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,6 +14,7 @@ import { navigate } from './helpers.js';
 interface LoginOptions {
   username?: string;
   password?: string;
+  user?: UserType;
   baseUrl?: string;
 }
 
@@ -15,8 +22,10 @@ interface LoginOptions {
  * Perform form based login operation from the "login" URL
  */
 export const doLogin = async (page: Page, options?: LoginOptions) => {
-  const username: string = options?.username ?? user.username;
-  const password: string = options?.password ?? user.password;
+  const username: string =
+    options?.username ?? options?.user?.username ?? allaccessuser.username;
+  const password: string =
+    options?.password ?? options?.user?.testcred ?? allaccessuser.testcred;
 
   console.log('- Logging in with username:', username);
 
@@ -27,8 +36,8 @@ export const doLogin = async (page: Page, options?: LoginOptions) => {
 
   await page.waitForURL('**/web/login');
 
-  await page.getByLabel('username').fill(username);
-  await page.getByLabel('password').fill(password);
+  await page.getByRole('textbox', { name: 'login-username' }).fill(username);
+  await page.getByRole('textbox', { name: 'login-password' }).fill(password);
 
   await page.waitForTimeout(100);
 
@@ -37,6 +46,10 @@ export const doLogin = async (page: Page, options?: LoginOptions) => {
   await page.waitForTimeout(100);
   await page.waitForLoadState('networkidle');
 
+  // Login lands on the FZ branch app - the shared helpers expect the
+  // classic dashboard, so navigate there explicitly
+  await navigate(page, homeUrl, { baseUrl: options?.baseUrl });
+
   await page.getByRole('link', { name: 'Dashboard' }).waitFor();
   await page.getByRole('button', { name: 'navigation-menu' }).waitFor();
   await page.waitForURL(/\/web(\/home)?/);
@@ -44,8 +57,7 @@ export const doLogin = async (page: Page, options?: LoginOptions) => {
 };
 
 export interface CachedLoginOptions {
-  username?: string;
-  password?: string;
+  user?: UserType;
   url?: string;
   baseUrl?: string;
 }
@@ -61,8 +73,8 @@ export const doCachedLogin = async (
   browser: Browser,
   options?: CachedLoginOptions
 ): Promise<Page> => {
-  const username = options?.username ?? user.username;
-  const password = options?.password ?? user.password;
+  const username = options?.user?.username ?? allaccessuser.username;
+  const password = options?.user?.testcred ?? allaccessuser.testcred;
   const url = options?.url ?? '';
 
   // FAIL if an unsupported username is provided
@@ -79,7 +91,7 @@ export const doCachedLogin = async (
     });
     console.log(`Using cached login state for ${username}`);
 
-    await navigate(page, url ?? webUrl, {
+    await navigate(page, url || homeUrl, {
       baseUrl: options?.baseUrl,
       waitUntil: 'networkidle'
     });

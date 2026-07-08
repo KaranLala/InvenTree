@@ -2,17 +2,22 @@ import { t } from '@lingui/core/macro';
 import type { SpotlightActionData } from '@mantine/spotlight';
 import {
   IconBarcode,
+  IconDevicesPc,
   IconLink,
   IconPlug,
   IconPointer,
+  IconReport,
   IconSettings,
+  IconTags,
   IconUserBolt,
-  IconUserCog
+  IconUserCog,
+  IconUsers
 } from '@tabler/icons-react';
 import type { NavigateFunction } from 'react-router-dom';
 
 import { ModelInformationDict } from '@lib/enums/ModelInformation';
-import { UserRoles } from '@lib/index';
+import { ModelType, StylishText, UserRoles } from '@lib/index';
+import { Trans } from '@lingui/react/macro';
 import { openContextModal } from '@mantine/modals';
 import { useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
@@ -21,10 +26,23 @@ import { useGlobalSettingsState } from '../states/SettingsStates';
 import { useUserState } from '../states/UserState';
 import { aboutInvenTree, docLinks, licenseInfo, serverInfo } from './links';
 
-export function openQrModal(navigate: NavigateFunction) {
+function openQrModal(navigate: NavigateFunction) {
   return openContextModal({
     modal: 'qr',
     innerProps: { navigate: navigate }
+  });
+}
+
+function openHotkeys() {
+  return openContextModal({
+    modal: 'hotkey',
+    title: (
+      <StylishText size='xl'>
+        <Trans>Hotkeys</Trans>
+      </StylishText>
+    ),
+    size: 'xl',
+    innerProps: {}
   });
 }
 
@@ -36,6 +54,8 @@ export function getActions(navigate: NavigateFunction) {
   const user = useUserState();
 
   const actions: SpotlightActionData[] = useMemo(() => {
+    const staff = user?.isStaff() ?? false;
+
     const _actions: SpotlightActionData[] = [
       {
         id: 'dashboard',
@@ -82,21 +102,29 @@ export function getActions(navigate: NavigateFunction) {
         leftSection: <IconPointer size='1.2rem' />
       },
       {
-        id: 'scan',
-        label: t`Scan`,
-        description: t`Scan a barcode or QR code`,
-        onClick: () => openQrModal(navigate),
-        leftSection: <IconBarcode size='1.2rem' />
-      },
-      {
         id: 'user-settings',
         label: t`User Settings`,
-
         description: t`Go to your user settings`,
         onClick: () => navigate('/settings/user'),
         leftSection: <IconUserCog size='1.2rem' />
+      },
+      {
+        id: 'hotkeys',
+        label: t`Hotkeys`,
+        description: t`View a list of available hotkeys`,
+        onClick: () => openHotkeys(),
+        leftSection: <IconSettings size='1.2rem' />
       }
     ];
+
+    staff &&
+      _actions.push({
+        id: 'data-import',
+        label: t`Import Data`,
+        description: t`Import data from a file`,
+        onClick: () => navigate('/settings/admin/import'),
+        leftSection: <IconPlug size='1.2rem' />
+      });
 
     // Page Actions
     user?.hasViewRole(UserRoles.purchase_order) &&
@@ -119,6 +147,17 @@ export function getActions(navigate: NavigateFunction) {
         leftSection: <IconLink size='1.2rem' />
       });
 
+    globalSettings.isSet('TRANSFERORDER_ENABLED') &&
+      user?.hasViewRole(UserRoles.transfer_order) &&
+      _actions.push({
+        id: 'transfer-orders',
+        label: t`Transfer Orders`,
+        description: t`Go to Transfer Orders`,
+        onClick: () =>
+          navigate(ModelInformationDict['transferorder'].url_overview!),
+        leftSection: <IconLink size='1.2rem' />
+      });
+
     globalSettings.isSet('RETURNORDER_ENABLED') &&
       user?.hasViewRole(UserRoles.return_order) &&
       _actions.push({
@@ -130,6 +169,15 @@ export function getActions(navigate: NavigateFunction) {
         leftSection: <IconLink size='1.2rem' />
       });
 
+    globalSettings.isSet('BARCODE_ENABLE') &&
+      _actions.push({
+        id: 'scan',
+        label: t`Scan`,
+        description: t`Scan a barcode or QR code`,
+        onClick: () => openQrModal(navigate),
+        leftSection: <IconBarcode size='1.2rem' />
+      });
+
     user?.hasViewRole(UserRoles.build) &&
       _actions.push({
         id: 'builds',
@@ -139,7 +187,7 @@ export function getActions(navigate: NavigateFunction) {
         leftSection: <IconLink size='1.2rem' />
       });
 
-    user?.isStaff() &&
+    staff &&
       _actions.push({
         id: 'system-settings',
         label: t`System Settings`,
@@ -148,7 +196,7 @@ export function getActions(navigate: NavigateFunction) {
         leftSection: <IconSettings size='1.2rem' />
       });
 
-    user?.isStaff() &&
+    staff &&
       _actions.push({
         id: 'admin-center',
         label: t`Admin Center`,
@@ -157,7 +205,28 @@ export function getActions(navigate: NavigateFunction) {
         leftSection: <IconUserBolt size='1.2rem' />
       });
 
-    user?.isStaff() &&
+    staff &&
+      user?.hasViewPermission(ModelType.error) &&
+      _actions.push({
+        id: 'error-logs',
+        label: t`Error Logs`,
+        description: t`View error logs for this instance`,
+        onClick: () => navigate('/settings/admin/errors'),
+        leftSection: <IconReport size='1.2rem' />
+      });
+
+    staff &&
+      user?.hasViewPermission(ModelType.user) &&
+      _actions.push({
+        id: 'users',
+        label: t`Users`,
+        description: t`Manage user accounts`,
+        onClick: () => navigate('/settings/admin/user'),
+        leftSection: <IconUsers size='1.2rem' />
+      });
+
+    staff &&
+      user?.hasViewPermission(ModelType.pluginconfig) &&
       _actions.push({
         id: 'plugin-settings',
         label: t`Plugins`,
@@ -166,8 +235,38 @@ export function getActions(navigate: NavigateFunction) {
         leftSection: <IconPlug size='1.2rem' />
       });
 
+    staff &&
+      user?.hasViewPermission(ModelType.pluginconfig) &&
+      _actions.push({
+        id: 'machine-management',
+        label: t`Machines`,
+        description: t`Manage machines and machine types`,
+        onClick: () => navigate('/settings/admin/machine'),
+        leftSection: <IconDevicesPc size='1.2rem' />
+      });
+
+    staff &&
+      user?.hasViewPermission(ModelType.reporttemplate) &&
+      _actions.push({
+        id: 'report-templates',
+        label: t`Report Templates`,
+        description: t`Manage report templates`,
+        onClick: () => navigate('/settings/admin/reports'),
+        leftSection: <IconReport size='1.2rem' />
+      });
+
+    staff &&
+      user?.hasViewPermission(ModelType.labeltemplate) &&
+      _actions.push({
+        id: 'label-templates',
+        label: t`Label Templates`,
+        description: t`Manage label templates`,
+        onClick: () => navigate('/settings/admin/labels'),
+        leftSection: <IconTags size='1.2rem' />
+      });
+
     return _actions;
   }, [navigate, setNavigationOpen, globalSettings, user]);
 
-  return actions;
+  return actions.sort((a, b) => (a.label ?? '').localeCompare(b.label ?? ''));
 }

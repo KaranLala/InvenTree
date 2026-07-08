@@ -24,6 +24,7 @@ import { Thumbnail } from '../components/images/Thumbnail';
 import { useCreateApiFormModal } from '../hooks/UseForm';
 import { useGlobalSettingsState } from '../states/SettingsStates';
 import { StatusFilterOptions } from '../tables/Filter';
+import { TagsField } from './CommonFields';
 
 export function useReturnOrderFields({
   duplicateOrderId
@@ -60,6 +61,7 @@ export function useReturnOrderFields({
         icon: <IconCalendar />
       },
       link: {},
+      tags: TagsField({}),
       contact: {
         icon: <IconUser />,
         adjustFilters: (value: ApiFormAdjustFilterType) => {
@@ -99,7 +101,8 @@ export function useReturnOrderFields({
             value: false,
             hidden: true
           },
-          copy_extra_lines: {}
+          copy_extra_lines: {},
+          copy_parameters: {}
         }
       };
     }
@@ -135,8 +138,9 @@ export function useReturnOrderLineItemFields({
           part_detail: true
         }
       },
-      quantity: {},
+      line: {},
       reference: {},
+      quantity: {},
       outcome: {
         hidden: create == true
       },

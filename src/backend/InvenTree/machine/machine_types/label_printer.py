@@ -111,7 +111,7 @@ class LabelPrinterBaseDriver(BaseDriver):
         Returns:
             A class instance of a DRF serializer class, by default this an instance of self.PrintingOptionsSerializer using the *args, **kwargs if existing for this driver
         """
-        return self.PrintingOptionsSerializer(*args, **kwargs)  # type: ignore
+        return self.PrintingOptionsSerializer(*args, **kwargs)
 
     # --- helper functions
     @property
@@ -267,4 +267,4 @@ class LabelPrinterMachine(BaseMachineType):
         if not location_pk:
             return None
 
-        return StockLocation.objects.get(pk=location_pk)
+        return StockLocation.objects.filter(pk=location_pk).first()
