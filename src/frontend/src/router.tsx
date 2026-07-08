@@ -144,6 +144,9 @@ export const FzPurchaseOrderDetail = Loadable(
   lazy(() => import('./fz/pages/po/FzPurchaseOrderDetail'))
 );
 export const FzStock = Loadable(lazy(() => import('./fz/pages/stock/FzStock')));
+export const FzItemMaster = Loadable(
+  lazy(() => import('./fz/pages/items/FzItemMaster'))
+);
 
 // Auth
 export const Login = Loadable(lazy(() => import('./pages/Auth/Login')));
@@ -180,6 +183,7 @@ export const routes = (
       <Route path='po/' element={<FzPurchaseOrderList />} />
       <Route path='po/:id' element={<FzPurchaseOrderDetail />} />
       <Route path='stock/' element={<FzStock />} />
+      <Route path='items/' element={<FzItemMaster />} />
     </Route>
     <Route path='/' element={<LayoutComponent />} errorElement={<ErrorPage />}>
       <Route index element={<Navigate to='/b/' replace />} />,

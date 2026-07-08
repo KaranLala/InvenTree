@@ -23,7 +23,8 @@ import { useBranchState } from '../state/BranchState';
 const SECTIONS = [
   { key: 'so', label: 'Sales', path: '/b/so/' },
   { key: 'po', label: 'Purchasing', path: '/b/po/' },
-  { key: 'stock', label: 'Stock', path: '/b/stock/' }
+  { key: 'stock', label: 'Stock', path: '/b/stock/' },
+  { key: 'items', label: 'Item master', path: '/b/items/' }
 ] as const;
 
 export default function FzTopBar() {

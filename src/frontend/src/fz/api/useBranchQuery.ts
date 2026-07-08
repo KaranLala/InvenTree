@@ -67,6 +67,39 @@ export function useBranchQuery<T = any>({
   });
 }
 
+/**
+ * Query keys for branch-independent data (parts, parameter templates,
+ * customers): prefixed ['fz-global'] so switching branch does not
+ * refetch them and branch invalidation does not touch them.
+ */
+export function fzGlobalKey(...parts: any[]) {
+  return ['fz-global', ...parts];
+}
+
+/** GET query for global (non-branch) data. */
+export function useGlobalQuery<T = any>({
+  key,
+  endpoint,
+  pk,
+  params,
+  enabled = true
+}: {
+  key: any[];
+  endpoint: ApiEndpoints | string;
+  pk?: number | string;
+  params?: Record<string, any>;
+  enabled?: boolean;
+}) {
+  const api = useApi();
+
+  return useQuery<T>({
+    queryKey: fzGlobalKey(...key),
+    enabled: enabled,
+    queryFn: async () =>
+      api.get(apiUrl(endpoint, pk), { params: params }).then((res) => res.data)
+  });
+}
+
 /** Invalidate every query for the active branch (post-mutation refresh). */
 export function useInvalidateBranch() {
   const queryClient = useQueryClient();
