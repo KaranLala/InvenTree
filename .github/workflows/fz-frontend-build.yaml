@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: yarn
@@ -29,7 +29,7 @@ jobs:
         run: cd src/frontend && yarn run compile && yarn run build
       - name: Write SHA version file
         run: echo "$GITHUB_SHA" > src/backend/InvenTree/web/static/web/.vite/sha.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: frontend-build
           path: src/backend/InvenTree/web/static/web
