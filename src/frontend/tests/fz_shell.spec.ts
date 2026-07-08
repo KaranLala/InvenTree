@@ -84,3 +84,16 @@ test('FZ Shell - Section navigation and classic UI escape hatch', async ({
   await page.getByLabel('open-branch-app').click();
   await page.waitForURL('**/web/b/so/');
 });
+
+test('FZ Shell - Master data dropdown reaches global sections', async ({
+  page
+}) => {
+  await doLogin(page);
+  await navigate(page, 'b/');
+  await page.waitForURL('**/web/b/so/');
+
+  // Global sections live behind the "Master data" dropdown
+  await page.getByTestId('fz-master-data-menu').click();
+  await page.getByRole('menuitem', { name: 'Customers' }).click();
+  await page.waitForURL('**/web/b/customers/');
+});
