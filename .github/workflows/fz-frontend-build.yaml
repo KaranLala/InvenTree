@@ -1,0 +1,37 @@
+name: FZ Frontend Build
+
+on:
+  push:
+    branches: [production]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fz-frontend-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: yarn
+          cache-dependency-path: src/frontend/yarn.lock
+      - name: Install dependencies
+        run: cd src/frontend && yarn install --frozen-lockfile
+      - name: Compile translations and build frontend
+        run: cd src/frontend && yarn run compile && yarn run build
+      - name: Write SHA version file
+        run: echo "$GITHUB_SHA" > src/backend/InvenTree/web/static/web/.vite/sha.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: src/backend/InvenTree/web/static/web
+          include-hidden-files: true
+          retention-days: 30
