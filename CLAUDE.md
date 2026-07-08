@@ -136,6 +136,13 @@ table; the numeric prefix is cosmetic. Duplicate numbers (e.g. two `0117_*.py` f
 6. **Verify**: `manage.py makemigrations --check` (clean graph, no missing migrations),
    then apply migrations on a fresh test DB (running the test suite does this) AND on a
    copy of a production DB before deploying.
+7. **GitHub Actions**: upstream workflow files under `.github/workflows/` are deleted
+   on `development`/`production` (only the fork's `fz-frontend-build.yaml` remains —
+   it builds the frontend on pushes to `production`). Upstream edits to those files
+   cause modify/delete conflicts on syncs — resolve by keeping them deleted. After each
+   sync, run `gh workflow list --repo KaranLala/InvenTree --all` and disable any
+   newly-indexed workflows (new/renamed upstream workflow files arrive enabled, and
+   workflows existing only on `master` can only be disabled after their first run).
 
 ## Upstream Policies
 
