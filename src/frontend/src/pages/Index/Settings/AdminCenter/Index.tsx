@@ -182,7 +182,7 @@ export default function AdminCenter() {
       },
       {
         name: 'tenant',
-        label: t`Tenants`,
+        label: t`Branches`,
         icon: <IconBuilding />,
         content: <TenantManagementPanel />,
         hidden: !user.hasViewRole(UserRoles.admin)

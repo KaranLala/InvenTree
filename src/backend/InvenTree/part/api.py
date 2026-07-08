@@ -382,7 +382,7 @@ class PartSalePriceList(DataExportViewMixin, ListCreateAPI):
     serializer_class = part_serializers.PartSalePriceSerializer
 
     filter_backends = SEARCH_ORDER_FILTER
-    filterset_fields = ['part']
+    filterset_fields = ['part', 'customer']
     ordering_fields = ['quantity', 'price', 'customer__name']
     ordering_field_aliases = {'customer': 'customer__name'}
     ordering = 'quantity'

@@ -2,9 +2,9 @@ import type { Browser, Page } from '@playwright/test';
 import {
   type UserType,
   allaccessuser,
+  homeUrl,
   loginUrl,
-  logoutUrl,
-  webUrl
+  logoutUrl
 } from './defaults';
 
 import fs from 'node:fs';
@@ -45,6 +45,10 @@ export const doLogin = async (page: Page, options?: LoginOptions) => {
 
   await page.waitForTimeout(100);
   await page.waitForLoadState('networkidle');
+
+  // Login lands on the FZ branch app - the shared helpers expect the
+  // classic dashboard, so navigate there explicitly
+  await navigate(page, homeUrl, { baseUrl: options?.baseUrl });
 
   await page.getByRole('link', { name: 'Dashboard' }).waitFor();
   await page.getByRole('button', { name: 'navigation-menu' }).waitFor();
@@ -87,7 +91,7 @@ export const doCachedLogin = async (
     });
     console.log(`Using cached login state for ${username}`);
 
-    await navigate(page, url ?? webUrl, {
+    await navigate(page, url || homeUrl, {
       baseUrl: options?.baseUrl,
       waitUntil: 'networkidle'
     });

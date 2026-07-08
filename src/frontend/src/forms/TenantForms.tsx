@@ -12,19 +12,19 @@ export function tenantFields(): ApiFormFieldSet {
       name: {
         field_type: 'string',
         required: true,
-        description: t`Unique name for the tenant`
+        description: t`Unique name for the branch`
       },
       description: {
         field_type: 'string',
-        description: t`Optional description of the tenant`
+        description: t`Optional description of the branch`
       },
       code: {
         field_type: 'string',
-        description: t`Optional unique code/identifier for the tenant`
+        description: t`Optional unique code/identifier for the branch`
       },
       is_active: {
         field_type: 'boolean',
-        description: t`Whether this tenant is currently active`
+        description: t`Whether this branch is currently active`
       },
       contact_name: {
         field_type: 'string',

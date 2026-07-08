@@ -584,7 +584,7 @@ export function TenantColumn(props: TableColumnProps): TableColumn {
     accessor: 'tenant',
     ordering: 'tenant',
     sortable: true,
-    title: t`Tenant`,
+    title: t`Branch`,
     render: (record: any) => {
       const tenant = resolveItem(record, props.accessor ?? 'tenant_detail');
       return tenant ? (

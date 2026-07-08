@@ -374,8 +374,8 @@ export function ProjectCodeFilter(): TableFilter {
 export function TenantFilter(): TableFilter {
   return {
     name: 'tenant',
-    label: t`Tenant`,
-    description: t`Filter by tenant`,
+    label: t`Branch`,
+    description: t`Filter by branch`,
     type: 'api',
     apiUrl: apiUrl(ApiEndpoints.tenant_list),
     model: ModelType.tenant,

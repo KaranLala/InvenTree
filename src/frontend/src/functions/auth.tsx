@@ -20,7 +20,7 @@ import { showLoginNotification } from './notifications';
 import { generateUrl } from './urls';
 
 export function followRedirect(navigate: NavigateFunction, redirect: any) {
-  let url = redirect?.redirectUrl ?? '/home';
+  let url = redirect?.redirectUrl ?? '/b/';
 
   if (redirect?.queryParams) {
     // Construct and appand query parameters
@@ -427,7 +427,7 @@ export const checkLoginState = async (
   setApiDefaults();
 
   if (redirect == '/') {
-    redirect = '/home';
+    redirect = '/b/';
   }
 
   const { isLoggedIn, fetchUserState } = useUserState.getState();

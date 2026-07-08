@@ -73,6 +73,7 @@ from stock.models import (
 )
 from stock.status_codes import StockHistoryCode, StockStatus
 from tenant.api import TenantFilterMixin
+from tenant.models import Tenant
 
 
 class GenerateBatchCode(GenericAPIView):
@@ -588,6 +589,13 @@ class StockFilter(FilterSet):
         label=_('Supplier'),
         queryset=Company.objects.filter(is_supplier=True),
         field_name='supplier_part__supplier',
+    )
+
+    tenant = rest_filters.ModelChoiceFilter(
+        label=_('Branch'),
+        queryset=Tenant.objects.all(),
+        field_name='location__tenant',
+        help_text=_('Filter by the branch of the stock item location'),
     )
 
     include_variants = rest_filters.BooleanFilter(

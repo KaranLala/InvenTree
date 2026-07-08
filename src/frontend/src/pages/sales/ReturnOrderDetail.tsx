@@ -239,7 +239,7 @@ export default function ReturnOrderDetail() {
       {
         type: 'text',
         name: 'tenant_detail.name',
-        label: t`Tenant`,
+        label: t`Branch`,
         icon: 'sitemap',
         copy: true,
         hidden: !order.tenant

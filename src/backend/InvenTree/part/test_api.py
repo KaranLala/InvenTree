@@ -2182,6 +2182,38 @@ class PartListTests(PartAPITestBase):
             f'Query count difference too high: {query_difference} (with: {query_count_with_price_breaks}, without: {query_count_without_price_breaks})',
         )
 
+    def test_sale_price_customer_filter(self):
+        """Test filtering sale price breaks by customer."""
+        url = reverse('api-part-sale-price-list')
+
+        customer = Company.objects.create(name='Break customer', is_customer=True)
+
+        part = Part.objects.create(
+            name='Part with customer breaks',
+            description='A part with customer-specific price breaks',
+            category=PartCategory.objects.first(),
+            salable=True,
+        )
+
+        generic = PartSellPriceBreak.objects.create(
+            part=part, quantity=1, price=10, price_currency='USD'
+        )
+        specific = PartSellPriceBreak.objects.create(
+            part=part, quantity=1, price=8, price_currency='USD', customer=customer
+        )
+
+        response = self.get(url, {'customer': customer.pk}, expected_code=200)
+        results = response.data
+        pks = {result['pk'] for result in results}
+
+        self.assertIn(specific.pk, pks)
+        self.assertNotIn(generic.pk, pks)
+
+        # Customer-filtered results include part and customer details
+        result = next(r for r in results if r['pk'] == specific.pk)
+        self.assertEqual(result['part_detail']['pk'], part.pk)
+        self.assertEqual(result['customer_detail']['pk'], customer.pk)
+
 
 class PartNotesTests(InvenTreeAPITestCase):
     """Tests for the 'notes' field (markdown field)."""

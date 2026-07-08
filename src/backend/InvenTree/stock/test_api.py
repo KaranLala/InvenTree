@@ -551,6 +551,37 @@ class StockItemListTest(StockAPITestCase):
         for ordering in ['part', 'location', 'stock', 'status', 'IPN', 'MPN', 'SKU']:
             self.run_ordering_test(self.list_url, ordering)
 
+    def test_tenant_filter(self):
+        """Test filtering stock items by the tenant (branch) of their location."""
+        from tenant.models import Tenant
+
+        part = Part.objects.first()
+
+        tenant1 = Tenant.objects.create(name='Branch A', code='BA')
+        tenant2 = Tenant.objects.create(name='Branch B', code='BB')
+
+        location1 = StockLocation.objects.create(
+            name='Branch A location', tenant=tenant1
+        )
+        location2 = StockLocation.objects.create(
+            name='Branch B location', tenant=tenant2
+        )
+
+        item1 = StockItem.objects.create(part=part, location=location1, quantity=10)
+        item2 = StockItem.objects.create(part=part, location=location2, quantity=10)
+        item3 = StockItem.objects.create(part=part, location=None, quantity=10)
+
+        result_pks = [r['pk'] for r in self.get_stock(tenant=tenant1.pk)]
+        self.assertIn(item1.pk, result_pks)
+        self.assertNotIn(item2.pk, result_pks)
+
+        # Items without a location belong to no branch and are excluded
+        self.assertNotIn(item3.pk, result_pks)
+
+        result_pks = [r['pk'] for r in self.get_stock(tenant=tenant2.pk)]
+        self.assertIn(item2.pk, result_pks)
+        self.assertNotIn(item1.pk, result_pks)
+
     def test_creation_date_filter_and_ordering(self):
         """Test created_before / created_after filters and ordering by creation_date."""
         import datetime
@@ -2367,6 +2398,36 @@ class StocktakeTest(StockAPITestCase):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
+    def test_transfer_partial(self):
+        """Test that a partial transfer moves exactly the requested quantity, once."""
+        stock_item = StockItem.objects.get(pk=1234)
+        part = stock_item.part
+        initial_quantity = stock_item.quantity
+        n_items = StockItem.objects.filter(part=part).count()
+        n_at_destination = StockItem.objects.filter(part=part, location=1).count()
+
+        data = {
+            'items': [{'pk': 1234, 'quantity': 100}],
+            'location': 1,
+            'notes': 'Partial transfer',
+        }
+
+        url = reverse('api-stock-transfer')
+
+        self.post(url, data, expected_code=201)
+
+        # Source item is reduced by exactly the requested quantity, and not moved
+        stock_item.refresh_from_db()
+        self.assertEqual(stock_item.quantity, initial_quantity - 100)
+        self.assertEqual(stock_item.location.pk, 5)
+
+        # Exactly one new stock item is created, at the destination
+        self.assertEqual(StockItem.objects.filter(part=part).count(), n_items + 1)
+
+        new_items = StockItem.objects.filter(part=part, location=1).exclude(pk=1234)
+        self.assertEqual(new_items.count(), n_at_destination + 1)
+        self.assertEqual(new_items.latest('pk').quantity, 100)
+
     def test_transfer_cross_tenant_validation(self):
         """Test that stock transfers between different tenants are prevented."""
         from tenant.models import Tenant
@@ -2417,6 +2478,8 @@ class StocktakeTest(StockAPITestCase):
             description='Another location for tenant 1',
         )
 
+        # Transfer the full quantity, so the item itself is moved (not split)
+        data['items'] = [{'pk': stock_item.pk, 'quantity': 10}]
         data['location'] = location3.pk
 
         # This should succeed
@@ -2425,6 +2488,7 @@ class StocktakeTest(StockAPITestCase):
         # Verify the stock item was moved
         stock_item.refresh_from_db()
         self.assertEqual(stock_item.location, location3)
+        self.assertEqual(stock_item.quantity, 10)
 
     def test_count_with_location(self):
         """Test that the stock count endpoint correctly handles the optional location field."""

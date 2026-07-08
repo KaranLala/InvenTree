@@ -76,9 +76,22 @@ Django apps, one per domain: `part`, `stock`, `order`, `build`, `company`, `user
 
 - Pages in `src/pages/`, tables in `src/tables/`, forms in `src/forms/`; shared enums/API endpoint definitions in `lib/enums/` (`ApiEndpoints.tsx`, `ModelType.tsx`, `ModelInformation.tsx` — new backend models must be registered in all three).
 - i18n via lingui (`npm run extract` / `compile`); locale files in `src/locales/`.
-- **The compiled frontend is committed to git** at `src/backend/InvenTree/web/static/web/` (upstream downloads it instead). After frontend changes intended for deployment, rebuild (`invoke int.frontend-build`) and commit the build output.
+- **The compiled frontend bundle is NOT committed to git** — `.gitignore` excludes `src/backend/InvenTree/web/static`. Only a few legacy tracked files there remain in git (`index.html`, `.vite/manifest.json`, `.vite/dependencies.json`, `inventree.svg`, two stray CSS files); rebuild commits only update those. The JS/CSS assets must be rebuilt at deploy time: `invoke int.frontend-compile` inside the dev container (yarn install + translation compile + build), or `yarn run compile && yarn run build` in `src/frontend`. Neither deploy task builds the frontend automatically: `invoke fz-updateServer` skips all frontend operations, and `invoke update` skips them inside Docker unless passed `--frontend` — build the frontend explicitly when deploying frontend changes.
 
 ## Fork-Specific Features
+
+### FZ app — "the new website" (`src/frontend/src/fz/`)
+
+A streamlined internal UI at route `/b/*` (Sales, Purchasing, Stock, Item
+master), coexisting with the stock InvenTree UI ("the old website" / "classic
+UI"), which stays intact for admin/edge tasks. Requests phrased as "the new
+website/app" mean `src/frontend/src/fz/`; "the old website" means the classic
+UI everywhere else. **Before changing FZ code, read
+`src/frontend/src/fz/CLAUDE.md`** — it carries the binding design rules
+(simple/minimal-click single-page workflows, Mantine only, no lingui, UI says
+"Branch" never "Tenant", branch-scoped vs global query helpers, optimistic
+update policy, escape-hatch philosophy). The FZ app is the default landing
+page after login.
 
 ### Tenant app (`src/backend/InvenTree/tenant/`)
 
