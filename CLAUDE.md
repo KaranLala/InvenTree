@@ -11,6 +11,8 @@ This is **Fanzart's fork** of [InvenTree](https://github.com/inventree/InvenTree
 - `production` — deployed branch
 - Feature branches (e.g. `inventree_base_auto_sales_price`) merge into `development`
 
+**Never commit or push directly to `production`.** All changes land on `development` first (either committed there or on a feature branch that is merged into `development`), and `production` is only ever advanced by merging `development` into it. This keeps `development` a strict superset of `production` and prevents stale/divergent state on the deployed branch.
+
 When comparing against upstream behavior, diff against `master`. Fork features are visible via `git diff master...development`.
 
 ## Development Environment
