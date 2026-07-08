@@ -30,6 +30,32 @@ test('FZ PO - Create modal opens without a branch field', async ({ page }) => {
   await page.getByRole('button', { name: 'Cancel' }).click();
 });
 
+test('FZ PO - Ghost row searches all parts', async ({ page }) => {
+  await doLogin(page);
+  await navigate(page, 'b/po/');
+  await page.waitForURL('**/web/b/po/');
+
+  // Show all orders, then open an editable one (pending/placed/on hold)
+  await page.getByText('Outstanding only').click();
+  await page.getByTestId('fz-po-table').waitFor();
+
+  await page
+    .locator('[data-testid="fz-po-table"] tbody tr')
+    .filter({ hasText: /Pending|Placed|On Hold/ })
+    .first()
+    .click();
+  await page.waitForURL(/\/web\/b\/po\/\d+/);
+
+  // Ghost row offers a global part search (not supplier-part scoped)
+  await page.getByTestId('fz-po-ghost-row').waitFor();
+  const search = page.getByTestId('fz-po-part-search');
+  await expect(search).toHaveAttribute('placeholder', 'Add part...');
+
+  // Any purchaseable part matches, regardless of supplier links
+  await search.fill('c');
+  await page.getByRole('option').first().waitFor();
+});
+
 test('FZ PO - Detail shows single-page zones', async ({ page }) => {
   await doLogin(page);
   await navigate(page, 'b/po/');
@@ -39,10 +65,7 @@ test('FZ PO - Detail shows single-page zones', async ({ page }) => {
   await page.getByText('Outstanding only').click();
   await page.getByTestId('fz-po-table').waitFor();
 
-  await page
-    .locator('[data-testid="fz-po-table"] tbody tr')
-    .first()
-    .click();
+  await page.locator('[data-testid="fz-po-table"] tbody tr').first().click();
   await page.waitForURL(/\/web\/b\/po\/\d+/);
 
   await page.getByTestId('fz-po-detail').waitFor();

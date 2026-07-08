@@ -26,22 +26,26 @@ import {
   IconTrash
 } from '@tabler/icons-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
+import { ProgressBar } from '@lib/components/ProgressBar';
 import { ApiEndpoints } from '@lib/enums/ApiEndpoints';
 import { ModelType } from '@lib/enums/ModelType';
 import { UserRoles } from '@lib/enums/Roles';
 import { apiUrl } from '@lib/functions/Api';
-import { formatDecimal } from '@lib/functions/Formatting';
-import { ProgressBar } from '@lib/components/ProgressBar';
 import { StatusRenderer } from '../../../components/render/StatusRenderer';
 import { useApi } from '../../../contexts/ApiContext';
 import { formatCurrency } from '../../../defaults/formatters';
 import { useUserState } from '../../../states/UserState';
 import { extractErrorMessage } from '../../api/errors';
 import { PO_EDITABLE_STATUSES, PO_STATUS, poActions } from '../../api/poStatus';
+import { pickSupplierPriceBreak } from '../../api/priceBreaks';
 import { effectiveOrderCurrency } from '../../api/soStatus';
+import {
+  lookupSupplierPart,
+  resolveSupplierPart
+} from '../../api/supplierParts';
 import { fzKey, useBranchQuery } from '../../api/useBranchQuery';
 import { useBranchState } from '../../state/BranchState';
 import { EditableNumberCell } from '../so/LineItemGrid';
@@ -359,9 +363,7 @@ export default function FzPurchaseOrderDetail() {
               </Table.Td>
             </Table.Tr>
           ))}
-          {editable && (
-            <PoGhostRow order={order} onCreated={invalidateOrder} />
-          )}
+          {editable && <PoGhostRow order={order} onCreated={invalidateOrder} />}
         </Table.Tbody>
       </Table>
 
@@ -378,7 +380,14 @@ export default function FzPurchaseOrderDetail() {
   );
 }
 
-/** Ghost row: supplier part search + quantity + unit price → POST. */
+/**
+ * Ghost row: global part search + quantity + unit price → POST.
+ *
+ * Any purchaseable part can be picked; the SupplierPart link the backend
+ * requires is resolved (or auto-created) on Add. Price suggestions come
+ * from the supplier's price breaks, then the last paid price, and never
+ * overwrite a manually entered value.
+ */
 function PoGhostRow({
   order,
   onCreated
@@ -388,25 +397,137 @@ function PoGhostRow({
 }) {
   const api = useApi();
 
-  const [supplierPart, setSupplierPart] = useState<any>(null);
+  const [part, setPart] = useState<any>(null);
+  // undefined = supplier link lookup in flight; null = no existing link
+  const [resolvedSp, setResolvedSp] = useState<any>(undefined);
   const [quantity, setQuantity] = useState<number | ''>(1);
   const [price, setPrice] = useState<number | ''>('');
+  const [priceTouched, setPriceTouched] = useState(false);
+  const [priceHint, setPriceHint] = useState<string | null>(null);
+  const lastPaidCache = useRef<
+    Map<number, { price: number; currency: string } | null>
+  >(new Map());
 
   const currency = effectiveOrderCurrency(order);
 
+  const selectPart = (selected: any | null) => {
+    setPart(selected);
+    setResolvedSp(undefined);
+    setPrice('');
+    setPriceTouched(false);
+    setPriceHint(null);
+  };
+
+  useEffect(() => {
+    if (!part) {
+      return;
+    }
+
+    let stale = false;
+
+    lookupSupplierPart(api, { partId: part.pk, supplierId: order.supplier })
+      .then((sp) => {
+        if (!stale) setResolvedSp(sp);
+      })
+      .catch(() => {
+        if (!stale) setResolvedSp(null);
+      });
+
+    return () => {
+      stale = true;
+    };
+  }, [part?.pk, order.supplier, api]);
+
+  // Suggest a unit price once the supplier link lookup has settled.
+  useEffect(() => {
+    if (!part || priceTouched || resolvedSp === undefined) {
+      return;
+    }
+
+    const match = pickSupplierPriceBreak(resolvedSp?.price_breaks, {
+      currency,
+      quantity: typeof quantity === 'number' ? quantity : 0
+    });
+
+    if (match) {
+      setPrice(Number(match.price));
+      setPriceHint(`break ${Number(match.break.quantity)}+`);
+      return;
+    }
+
+    let stale = false;
+
+    const apply = (entry: { price: number; currency: string } | null) => {
+      if (stale) return;
+      if (entry && entry.currency === currency) {
+        setPrice(entry.price);
+        setPriceHint('last paid');
+      } else {
+        setPrice('');
+        setPriceHint(null);
+      }
+    };
+
+    const cached = lastPaidCache.current.get(part.pk);
+    if (cached !== undefined) {
+      apply(cached);
+      return;
+    }
+
+    const fetchLast = async (params: Record<string, any>) => {
+      const response = await api.get(
+        apiUrl(ApiEndpoints.purchase_order_line_list),
+        {
+          params: { ...params, has_pricing: true, ordering: '-order', limit: 1 }
+        }
+      );
+      const data = response.data;
+      const results = Array.isArray(data) ? data : (data?.results ?? []);
+      return results[0] ?? null;
+    };
+
+    (async () => {
+      // Most recent purchase with this supplier, then with any supplier
+      let line = resolvedSp ? await fetchLast({ part: resolvedSp.pk }) : null;
+      line = line ?? (await fetchLast({ base_part: part.pk }));
+
+      const entry = line?.purchase_price
+        ? {
+            price: Number(line.purchase_price),
+            currency: line.purchase_price_currency
+          }
+        : null;
+
+      lastPaidCache.current.set(part.pk, entry);
+      apply(entry);
+    })().catch(() => apply(null));
+
+    return () => {
+      stale = true;
+    };
+  }, [part?.pk, resolvedSp, quantity, priceTouched, currency, api]);
+
   const createMutation = useMutation({
-    mutationFn: async () =>
-      api.post(apiUrl(ApiEndpoints.purchase_order_line_list), {
+    mutationFn: async () => {
+      const sp =
+        resolvedSp ??
+        (await resolveSupplierPart(api, { part, supplierId: order.supplier }));
+
+      return api.post(apiUrl(ApiEndpoints.purchase_order_line_list), {
         order: order.pk,
-        part: supplierPart.pk,
+        part: sp.pk,
         quantity: quantity,
         purchase_price: price === '' ? undefined : price,
-        purchase_price_currency: currency
-      }),
+        purchase_price_currency: currency,
+        // Blank price: let the server fill a currency-converted break price
+        auto_pricing: price === ''
+      });
+    },
     onSuccess: () => {
-      setSupplierPart(null);
+      // New purchase data invalidates the last-paid suggestions
+      lastPaidCache.current.clear();
+      selectPart(null);
       setQuantity(1);
-      setPrice('');
       onCreated();
     },
     onError: (error) => {
@@ -419,7 +540,7 @@ function PoGhostRow({
   });
 
   const submit = () => {
-    if (supplierPart && quantity !== '' && Number(quantity) > 0) {
+    if (part && quantity !== '' && Number(quantity) > 0) {
       createMutation.mutate();
     }
   };
@@ -427,11 +548,7 @@ function PoGhostRow({
   return (
     <Table.Tr data-testid='fz-po-ghost-row'>
       <Table.Td>
-        <SupplierPartCombobox
-          supplierId={order.supplier}
-          value={supplierPart}
-          onChange={setSupplierPart}
-        />
+        <PartCombobox value={part} onChange={selectPart} />
       </Table.Td>
       <Table.Td>
         <NumberInput
@@ -450,10 +567,19 @@ function PoGhostRow({
           min={0}
           decimalScale={2}
           placeholder='Unit price'
-          onChange={(val) => setPrice(typeof val === 'number' ? val : '')}
+          onChange={(val) => {
+            setPrice(typeof val === 'number' ? val : '');
+            setPriceTouched(true);
+            setPriceHint(null);
+          }}
           onKeyDown={(event) => event.key === 'Enter' && submit()}
           aria-label='new-line-price'
         />
+        {priceHint && (
+          <Text size='xs' c='dimmed'>
+            {priceHint}
+          </Text>
+        )}
       </Table.Td>
       <Table.Td />
       <Table.Td>
@@ -461,7 +587,7 @@ function PoGhostRow({
           size='compact-xs'
           onClick={submit}
           loading={createMutation.isPending}
-          disabled={!supplierPart || quantity === ''}
+          disabled={!part || quantity === ''}
           data-testid='fz-po-add-line'
         >
           Add
@@ -471,13 +597,11 @@ function PoGhostRow({
   );
 }
 
-/** Async supplier part search, limited to the order's supplier. */
-function SupplierPartCombobox({
-  supplierId,
+/** Async global part search — any active purchaseable part. */
+function PartCombobox({
   value,
   onChange
 }: {
-  supplierId: number;
   value: any;
   onChange: (part: any | null) => void;
 }) {
@@ -499,12 +623,11 @@ function SupplierPartCombobox({
     setLoading(true);
 
     api
-      .get(apiUrl(ApiEndpoints.supplier_part_list), {
+      .get(apiUrl(ApiEndpoints.part_list), {
         params: {
           search: debouncedQuery,
-          supplier: supplierId,
+          purchaseable: true,
           active: true,
-          part_detail: true,
           limit: 20
         }
       })
@@ -521,10 +644,9 @@ function SupplierPartCombobox({
     return () => {
       stale = true;
     };
-  }, [debouncedQuery, supplierId, api]);
+  }, [debouncedQuery, api]);
 
-  const label = (option: any) =>
-    `${option.part_detail?.full_name ?? option.SKU} (${option.SKU})`;
+  const label = (option: any) => option.full_name ?? option.name;
 
   return (
     <Combobox
@@ -539,7 +661,7 @@ function SupplierPartCombobox({
       <Combobox.Target>
         <TextInput
           size='xs'
-          placeholder='Add supplier part...'
+          placeholder='Add part...'
           value={value ? label(value) : query}
           rightSection={loading ? <Loader size='xs' /> : undefined}
           onChange={(event) => {
@@ -549,6 +671,7 @@ function SupplierPartCombobox({
           }}
           onFocus={() => combobox.openDropdown()}
           aria-label='new-line-part'
+          data-testid='fz-po-part-search'
         />
       </Combobox.Target>
       <Combobox.Dropdown hidden={options.length === 0}>
@@ -556,12 +679,13 @@ function SupplierPartCombobox({
           {options.map((option) => (
             <Combobox.Option value={String(option.pk)} key={option.pk}>
               <Group gap='xs' wrap='nowrap'>
-                <Avatar
-                  src={option.part_detail?.thumbnail}
-                  size='xs'
-                  radius='sm'
-                />
+                <Avatar src={option.thumbnail} size='xs' radius='sm' />
                 <Text size='sm'>{label(option)}</Text>
+                {option.IPN && (
+                  <Text size='xs' c='dimmed'>
+                    {option.IPN}
+                  </Text>
+                )}
               </Group>
             </Combobox.Option>
           ))}

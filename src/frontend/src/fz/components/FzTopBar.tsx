@@ -22,7 +22,9 @@ import { useBranchState } from '../state/BranchState';
 
 const SECTIONS = [
   { key: 'so', label: 'Sales', path: '/b/so/' },
+  { key: 'customers', label: 'Customers', path: '/b/customers/' },
   { key: 'po', label: 'Purchasing', path: '/b/po/' },
+  { key: 'suppliers', label: 'Suppliers', path: '/b/suppliers/' },
   { key: 'stock', label: 'Stock', path: '/b/stock/' },
   { key: 'items', label: 'Item master', path: '/b/items/' }
 ] as const;

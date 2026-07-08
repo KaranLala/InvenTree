@@ -1,10 +1,14 @@
 """InvenTree API version information."""
 
 # InvenTree API version
-INVENTREE_API_VERSION = 512
+INVENTREE_API_VERSION = 513
 """Increment this API version number whenever there is a significant change to the API that any clients need to know about."""
 
 INVENTREE_API_TEXT = """
+
+v513 -> 2026-07-08 : (fork)
+    - Adds 'customer' filter to the PartSalePrice list API
+    - Adds 'part_detail' field to the PartSalePrice serializer
 
 v512 -> 2026-07-07 : (fork)
     - Adds 'tenant' filter to the StockItem list API (filters by the tenant of the stock item location)

@@ -67,6 +67,54 @@ export function pickPriceBreak(
   };
 }
 
+export interface SupplierPriceBreak {
+  pk: number;
+  part: number; // SupplierPart pk
+  quantity: number;
+  price: string;
+  price_currency: string;
+}
+
+export interface SupplierPriceBreakMatch {
+  price: string;
+  break: SupplierPriceBreak;
+}
+
+/**
+ * Pick the applicable supplier price break for a PO line, mirroring the
+ * backend's SupplierPart.get_price (common/currency.py):
+ * 1. Only breaks in the order currency apply — no client-side FX; leave
+ *    the price blank instead and let the server fill it via auto_pricing.
+ * 2. The largest quantity threshold <= quantity wins.
+ * 3. Below the smallest threshold, the smallest break applies.
+ */
+export function pickSupplierPriceBreak(
+  breaks: SupplierPriceBreak[] | undefined,
+  { currency, quantity }: { currency: string; quantity: number }
+): SupplierPriceBreakMatch | null {
+  if (!breaks || quantity <= 0) {
+    return null;
+  }
+
+  const sameCurrency = breaks.filter((pb) => pb.price_currency === currency);
+
+  if (sameCurrency.length === 0) {
+    return null;
+  }
+
+  const applicable = sameCurrency
+    .filter((pb) => quantity >= Number(pb.quantity))
+    .sort((a, b) => Number(b.quantity) - Number(a.quantity));
+
+  const chosen =
+    applicable[0] ??
+    [...sameCurrency].sort(
+      (a, b) => Number(a.quantity) - Number(b.quantity)
+    )[0];
+
+  return { price: chosen.price, break: chosen };
+}
+
 /** Short human hint for where an auto-applied price came from. */
 export function priceBreakHint(match: PriceBreakMatch): string {
   const source = match.customerSpecific

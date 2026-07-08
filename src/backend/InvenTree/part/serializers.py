@@ -268,6 +268,7 @@ class PartSalePriceSerializer(
         fields = [
             'pk',
             'part',
+            'part_detail',
             'quantity',
             'price',
             'price_currency',
@@ -300,6 +301,12 @@ class PartSalePriceSerializer(
         if not obj.customer:
             return None
         return CompanyBriefSerializer(obj.customer).data
+
+    part_detail = serializers.SerializerMethodField(read_only=True)
+
+    def get_part_detail(self, obj):
+        """Get the part detail for the price break."""
+        return PartBriefSerializer(obj.part, many=False).data
 
 
 class PartInternalPriceSerializer(InvenTree.serializers.InvenTreeModelSerializer):
