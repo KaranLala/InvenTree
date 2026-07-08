@@ -76,8 +76,10 @@ echo "Running inv fz-updateServer..."
 inv fz-updateServer
 
 # --- Backend translations (.mo files are not in git) ---
+# Invoked directly rather than via `inv int.backend-compilemessages`:
+# production's tasks.py may predate that task.
 echo "Compiling backend translations..."
-inv int.backend-compilemessages
+(cd "$REPO_DIR/src/backend/InvenTree" && python3 -m django compilemessages -v 0)
 
 # --- Restart services ---
 echo "Restarting inventree-server..."
