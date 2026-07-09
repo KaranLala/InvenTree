@@ -25,8 +25,11 @@ jobs:
           cache-dependency-path: src/frontend/yarn.lock
       - name: Install dependencies
         run: cd src/frontend && yarn install --frozen-lockfile
-      - name: Compile translations and build frontend
-        run: cd src/frontend && yarn run compile && yarn run build
+      - name: Extract, compile translations and build frontend
+        # `extract` re-scans source so newly added/changed strings land in the
+        # catalogs; without it `compile` reads stale .po files and untranslated
+        # strings leak into the UI as lingui hash IDs (e.g. "UTVshK").
+        run: cd src/frontend && yarn run extract && yarn run compile && yarn run build
       - name: Write SHA version file
         run: echo "$GITHUB_SHA" > src/backend/InvenTree/web/static/web/.vite/sha.txt
       - uses: actions/upload-artifact@v7
