@@ -4,7 +4,7 @@
     {
       "name": "frontend-dev",
       "runtimeExecutable": "yarn",
-      "runtimeArgs": ["--cwd", "src/frontend", "dev"],
+      "runtimeArgs": ["--cwd", "src/frontend", "dev", "--host", "127.0.0.1"],
       "port": 5173
     }
   ]
