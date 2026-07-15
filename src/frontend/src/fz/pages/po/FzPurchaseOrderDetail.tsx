@@ -37,6 +37,8 @@ import { apiUrl } from '@lib/functions/Api';
 import { StatusRenderer } from '../../../components/render/StatusRenderer';
 import { useApi } from '../../../contexts/ApiContext';
 import { formatCurrency } from '../../../defaults/formatters';
+import { usePurchaseOrderFields } from '../../../forms/PurchaseOrderForms';
+import { useEditApiFormModal } from '../../../hooks/UseForm';
 import { useUserState } from '../../../states/UserState';
 import { extractErrorMessage } from '../../api/errors';
 import { PO_EDITABLE_STATUSES, PO_STATUS, poActions } from '../../api/poStatus';
@@ -47,6 +49,7 @@ import {
   resolveSupplierPart
 } from '../../api/supplierParts';
 import { fzKey, useBranchQuery } from '../../api/useBranchQuery';
+import OrderPartyCard from '../../components/OrderPartyCard';
 import { useBranchState } from '../../state/BranchState';
 import { EditableNumberCell } from '../so/LineItemGrid';
 import ReceiveDrawer from './ReceiveDrawer';
@@ -70,7 +73,11 @@ export default function FzPurchaseOrderDetail() {
     key: ['po', orderId, 'detail'],
     endpoint: ApiEndpoints.purchase_order_list,
     pk: orderId,
-    params: { supplier_detail: true },
+    params: {
+      supplier_detail: true,
+      contact_detail: true,
+      address_detail: true
+    },
     scoped: false
   });
 
@@ -98,6 +105,26 @@ export default function FzPurchaseOrderDetail() {
       queryKey: fzKey(branchId, 'purchase-orders')
     });
   };
+
+  const orderFields = usePurchaseOrderFields({});
+
+  // Focused editor: only the supplier / contact / address of the order
+  const partyFields = useMemo(
+    () => ({
+      supplier: orderFields.supplier,
+      contact: orderFields.contact,
+      address: orderFields.address
+    }),
+    [orderFields]
+  );
+
+  const editOrder = useEditApiFormModal({
+    url: ApiEndpoints.purchase_order_list,
+    pk: orderId,
+    title: 'Edit Supplier',
+    fields: partyFields,
+    onFormSuccess: invalidateOrder
+  });
 
   const actionMutation = useMutation({
     mutationFn: async (endpoint: ApiEndpoints) =>
@@ -170,6 +197,7 @@ export default function FzPurchaseOrderDetail() {
 
   return (
     <Stack data-testid='fz-po-detail'>
+      {editOrder.modal}
       <Group justify='space-between' wrap='nowrap' align='flex-start'>
         <Group gap='sm' wrap='nowrap'>
           <ActionIcon
@@ -248,6 +276,16 @@ export default function FzPurchaseOrderDetail() {
           </Tooltip>
         </Group>
       </Group>
+
+      <OrderPartyCard
+        label='Supplier'
+        company={order.supplier_detail}
+        contact={order.contact_detail}
+        address={order.address_detail}
+        canEdit={user.hasChangeRole(UserRoles.purchase_order)}
+        onEdit={editOrder.open}
+        testId='fz-po-supplier'
+      />
 
       <Card withBorder p='sm'>
         <Group gap='xl'>

@@ -669,7 +669,11 @@ class SalesOrderTest(InvenTreeTestCase):
 
 
 class SalesOrderAutoAllocateTest(InvenTreeTestCase):
-    """Tests for SalesOrder.auto_allocate_stock()."""
+    """Tests for SalesOrder.auto_allocate_stock().
+
+    Stock is only sourced from each line item's own location tree, and a
+    structured per-line result list is returned.
+    """
 
     fixtures = ['company', 'users']
 
@@ -691,11 +695,15 @@ class SalesOrderAutoAllocateTest(InvenTreeTestCase):
 
         cls.loc_a = StockLocation.objects.create(name='Shelf A')
         cls.loc_b = StockLocation.objects.create(name='Shelf B', parent=cls.loc_a)
+        cls.loc_c = StockLocation.objects.create(name='Shelf C')
 
-    def _make_order(self, qty=50):
+    def _make_order(self, qty=50, location='default'):
         order = SalesOrder.objects.create(customer=self.customer)
         line = SalesOrderLineItem.objects.create(
-            order=order, part=self.part, quantity=qty
+            order=order,
+            part=self.part,
+            quantity=qty,
+            location=self.loc_a if location == 'default' else location,
         )
         shipment = SalesOrderShipment.objects.create(order=order)
         return order, line, shipment
@@ -703,9 +711,11 @@ class SalesOrderAutoAllocateTest(InvenTreeTestCase):
     def test_allocates_single_item(self):
         """A single stock item that covers the full quantity is fully allocated."""
         order, line, _ = self._make_order(qty=30)
-        stock = StockItem.objects.create(part=self.part, quantity=100)
+        stock = StockItem.objects.create(
+            part=self.part, quantity=100, location=self.loc_a
+        )
 
-        order.auto_allocate_stock()
+        results = order.auto_allocate_stock()
 
         self.assertEqual(SalesOrderAllocation.objects.filter(line=line).count(), 1)
         alloc = SalesOrderAllocation.objects.get(line=line)
@@ -713,11 +723,20 @@ class SalesOrderAutoAllocateTest(InvenTreeTestCase):
         self.assertEqual(alloc.quantity, 30)
         self.assertTrue(line.is_fully_allocated())
 
+        self.assertEqual(len(results), 1)
+        result = results[0]
+        self.assertEqual(result['line'], line.pk)
+        self.assertEqual(result['status'], 'allocated')
+        self.assertEqual(result['required'], 30)
+        self.assertEqual(result['allocated'], 30)
+        self.assertEqual(result['available'], 100)
+        self.assertEqual(result['location'], self.loc_a.pk)
+
     def test_interchangeable_consumes_multiple_items(self):
         """With interchangeable=True (default), multiple stock items are consumed."""
         order, line, _ = self._make_order(qty=50)
-        StockItem.objects.create(part=self.part, quantity=20)
-        StockItem.objects.create(part=self.part, quantity=40)
+        StockItem.objects.create(part=self.part, quantity=20, location=self.loc_a)
+        StockItem.objects.create(part=self.part, quantity=40, location=self.loc_a)
 
         order.auto_allocate_stock(interchangeable=True)
 
@@ -730,19 +749,24 @@ class SalesOrderAutoAllocateTest(InvenTreeTestCase):
     def test_not_interchangeable_skips_split_stock(self):
         """With interchangeable=False, allocation is skipped when stock is split."""
         order, line, _ = self._make_order(qty=50)
-        StockItem.objects.create(part=self.part, quantity=20)
-        StockItem.objects.create(part=self.part, quantity=20)
+        StockItem.objects.create(part=self.part, quantity=20, location=self.loc_a)
+        StockItem.objects.create(part=self.part, quantity=20, location=self.loc_a)
 
-        order.auto_allocate_stock(interchangeable=False)
+        results = order.auto_allocate_stock(interchangeable=False)
 
         self.assertEqual(SalesOrderAllocation.objects.filter(line=line).count(), 0)
         self.assertFalse(line.is_fully_allocated())
 
+        # The true available quantity is still reported
+        self.assertEqual(results[0]['status'], 'no_stock')
+        self.assertEqual(results[0]['allocated'], 0)
+        self.assertEqual(results[0]['available'], 40)
+
     def test_not_interchangeable_uses_single_sufficient_item(self):
         """With interchangeable=False, a single item that covers the full qty is used."""
         order, line, _ = self._make_order(qty=30)
-        StockItem.objects.create(part=self.part, quantity=10)
-        StockItem.objects.create(part=self.part, quantity=50)
+        StockItem.objects.create(part=self.part, quantity=10, location=self.loc_a)
+        StockItem.objects.create(part=self.part, quantity=50, location=self.loc_a)
 
         order.auto_allocate_stock(interchangeable=False)
 
@@ -750,28 +774,89 @@ class SalesOrderAutoAllocateTest(InvenTreeTestCase):
         alloc = SalesOrderAllocation.objects.get(line=line)
         self.assertEqual(alloc.quantity, 30)
 
-    def test_location_filter(self):
-        """Only stock within the specified location tree is considered."""
-        order, line, _ = self._make_order(qty=10)
-        StockItem.objects.create(part=self.part, quantity=100, location=self.loc_a)
+    def test_line_location_scoping(self):
+        """Stock outside the line's location tree is never allocated."""
+        order, line, _ = self._make_order(qty=10)  # line location = loc_a
+        StockItem.objects.create(part=self.part, quantity=100, location=self.loc_c)
         StockItem.objects.create(part=self.part, quantity=100)  # no location
 
-        order.auto_allocate_stock(location=self.loc_a)
+        results = order.auto_allocate_stock()
 
-        allocs = SalesOrderAllocation.objects.filter(line=line)
-        self.assertTrue(allocs.exists())
-        for alloc in allocs:
-            self.assertEqual(alloc.item.location, self.loc_a)
+        self.assertEqual(SalesOrderAllocation.objects.filter(line=line).count(), 0)
+        self.assertEqual(results[0]['status'], 'no_stock')
+        self.assertEqual(results[0]['available'], 0)
+
+    def test_sublocation_stock_included(self):
+        """Stock in a sublocation of the line's location is allocated."""
+        order, line, _ = self._make_order(qty=10)  # line location = loc_a
+        stock = StockItem.objects.create(
+            part=self.part, quantity=50, location=self.loc_b
+        )
+
+        results = order.auto_allocate_stock()
+
+        alloc = SalesOrderAllocation.objects.get(line=line)
+        self.assertEqual(alloc.item, stock)
+        self.assertEqual(results[0]['status'], 'allocated')
+
+    def test_partial_shortfall(self):
+        """A location that cannot fully cover a line is partially allocated."""
+        order, line, _ = self._make_order(qty=50)
+        StockItem.objects.create(part=self.part, quantity=30, location=self.loc_a)
+
+        results = order.auto_allocate_stock()
+
+        total = SalesOrderAllocation.objects.filter(line=line).aggregate(
+            t=Sum('quantity')
+        )['t']
+        self.assertEqual(total, 30)
+        self.assertFalse(line.is_fully_allocated())
+
+        result = results[0]
+        self.assertEqual(result['status'], 'partial')
+        self.assertEqual(result['required'], 50)
+        self.assertEqual(result['allocated'], 30)
+        self.assertEqual(result['available'], 30)
+
+    def test_line_without_location_skipped(self):
+        """Lines without a location are skipped and reported."""
+        order, line, _ = self._make_order(qty=10, location=None)
+        StockItem.objects.create(part=self.part, quantity=100, location=self.loc_a)
+
+        results = order.auto_allocate_stock()
+
+        self.assertEqual(SalesOrderAllocation.objects.filter(line=line).count(), 0)
+        result = results[0]
+        self.assertEqual(result['status'], 'no_location')
+        self.assertIsNone(result['location'])
+        self.assertEqual(result['allocated'], 0)
+
+    def test_location_filter(self):
+        """The order-wide location kwarg intersects each line's own location."""
+        order, line, _ = self._make_order(qty=10)  # line location = loc_a
+        StockItem.objects.create(part=self.part, quantity=100, location=self.loc_a)
+
+        # Disjoint intersection: kwarg location does not overlap line location
+        results = order.auto_allocate_stock(location=self.loc_c)
+        self.assertEqual(SalesOrderAllocation.objects.filter(line=line).count(), 0)
+        self.assertEqual(results[0]['status'], 'no_stock')
+
+        # Matching intersection: allocation proceeds
+        results = order.auto_allocate_stock(location=self.loc_a)
+        self.assertEqual(SalesOrderAllocation.objects.filter(line=line).count(), 1)
+        self.assertEqual(results[0]['status'], 'allocated')
 
     def test_exclude_location_filter(self):
         """Stock within the excluded location tree is not used."""
-        order, line, _ = self._make_order(qty=10)
+        order, line, _ = self._make_order(qty=10)  # line location = loc_a
         excluded = StockItem.objects.create(
+            part=self.part, quantity=100, location=self.loc_b
+        )
+        included = StockItem.objects.create(
             part=self.part, quantity=100, location=self.loc_a
         )
-        included = StockItem.objects.create(part=self.part, quantity=100)
 
-        order.auto_allocate_stock(exclude_location=self.loc_a)
+        order.auto_allocate_stock(exclude_location=self.loc_b)
 
         allocs = SalesOrderAllocation.objects.filter(line=line)
         self.assertTrue(allocs.exists())
@@ -780,17 +865,20 @@ class SalesOrderAutoAllocateTest(InvenTreeTestCase):
         self.assertIn(included, allocated_items)
 
     def test_skips_fully_allocated_lines(self):
-        """Lines that are already fully allocated are not touched."""
+        """Lines that are already fully allocated are not touched or reported."""
         order, line, shipment = self._make_order(qty=10)
-        existing = StockItem.objects.create(part=self.part, quantity=100)
+        existing = StockItem.objects.create(
+            part=self.part, quantity=100, location=self.loc_a
+        )
         SalesOrderAllocation.objects.create(
             line=line, item=existing, quantity=10, shipment=shipment
         )
         self.assertTrue(line.is_fully_allocated())
 
-        order.auto_allocate_stock()
+        results = order.auto_allocate_stock()
 
         self.assertEqual(SalesOrderAllocation.objects.filter(line=line).count(), 1)
+        self.assertEqual(results, [])
 
     def test_skips_virtual_parts(self):
         """Line items for virtual parts are skipped (virtual parts cannot hold stock)."""
@@ -799,11 +887,12 @@ class SalesOrderAutoAllocateTest(InvenTreeTestCase):
             order=order, part=self.virtual_part, quantity=5
         )
 
-        order.auto_allocate_stock()
+        results = order.auto_allocate_stock()
 
         self.assertEqual(
             SalesOrderAllocation.objects.filter(line=virtual_line).count(), 0
         )
+        self.assertEqual(results, [])
         # Virtual parts are considered fully allocated without any stock
         self.assertTrue(virtual_line.is_fully_allocated())
 
@@ -811,7 +900,7 @@ class SalesOrderAutoAllocateTest(InvenTreeTestCase):
         """Serialized stock items are included in auto-allocation."""
         order, line, _ = self._make_order(qty=1)
         serialized = StockItem.objects.create(
-            part=self.part, quantity=1, serial='SN001'
+            part=self.part, quantity=1, serial='SN001', location=self.loc_a
         )
 
         order.auto_allocate_stock()
@@ -824,7 +913,7 @@ class SalesOrderAutoAllocateTest(InvenTreeTestCase):
     def test_shipment_assigned(self):
         """Allocations are assigned to the provided shipment."""
         order, line, shipment = self._make_order(qty=10)
-        StockItem.objects.create(part=self.part, quantity=50)
+        StockItem.objects.create(part=self.part, quantity=50, location=self.loc_a)
 
         order.auto_allocate_stock(shipment=shipment)
 
@@ -836,8 +925,10 @@ class SalesOrderAutoAllocateTest(InvenTreeTestCase):
     def test_sort_quantity_asc(self):
         """quantity_asc sort consumes smallest lots first."""
         order, line, _ = self._make_order(qty=15)
-        small = StockItem.objects.create(part=self.part, quantity=5)
-        StockItem.objects.create(part=self.part, quantity=100)
+        small = StockItem.objects.create(
+            part=self.part, quantity=5, location=self.loc_a
+        )
+        StockItem.objects.create(part=self.part, quantity=100, location=self.loc_a)
 
         order.auto_allocate_stock(stock_sort_by='quantity', interchangeable=True)
 
@@ -849,8 +940,10 @@ class SalesOrderAutoAllocateTest(InvenTreeTestCase):
     def test_sort_quantity_desc(self):
         """quantity_desc sort consumes largest lots first."""
         order, line, _ = self._make_order(qty=15)
-        StockItem.objects.create(part=self.part, quantity=5)
-        large = StockItem.objects.create(part=self.part, quantity=100)
+        StockItem.objects.create(part=self.part, quantity=5, location=self.loc_a)
+        large = StockItem.objects.create(
+            part=self.part, quantity=100, location=self.loc_a
+        )
 
         order.auto_allocate_stock(stock_sort_by='-quantity', interchangeable=True)
 
@@ -859,6 +952,48 @@ class SalesOrderAutoAllocateTest(InvenTreeTestCase):
         # Large lot should be the first consumed (fully covers 15)
         self.assertEqual(allocs.count(), 1)
         self.assertEqual(allocs.first().item, large)
+
+    def test_tenant_stock_excluded(self):
+        """Stock in a location belonging to another tenant is never allocated."""
+        default_tenant = Tenant.objects.first()
+        other_tenant = Tenant.objects.create(name='Other Tenant')
+
+        order, line, _ = self._make_order(qty=10)
+        order.tenant = default_tenant
+        order.save()
+
+        # Sublocation of the line location, but belonging to another tenant
+        # (bypasses StockLocation.clean() intentionally)
+        foreign_loc = StockLocation.objects.create(
+            name='Foreign Shelf', parent=self.loc_a, tenant=other_tenant
+        )
+        StockItem.objects.create(part=self.part, quantity=100, location=foreign_loc)
+
+        results = order.auto_allocate_stock()
+
+        self.assertEqual(SalesOrderAllocation.objects.filter(line=line).count(), 0)
+        self.assertEqual(results[0]['status'], 'no_stock')
+
+    def test_cross_tenant_line_location_rejected(self):
+        """Validation fails when the line location tenant differs from the order tenant."""
+        default_tenant = Tenant.objects.first()
+        other_tenant = Tenant.objects.create(name='Other Tenant 2')
+
+        order = SalesOrder.objects.create(
+            customer=self.customer, tenant=default_tenant
+        )
+        foreign_loc = StockLocation.objects.create(
+            name='Foreign Shelf 2', tenant=other_tenant
+        )
+
+        line = SalesOrderLineItem(
+            order=order, part=self.part, quantity=1, location=foreign_loc
+        )
+
+        with self.assertRaises(ValidationError) as cm:
+            line.full_clean()
+
+        self.assertIn('location', cm.exception.message_dict)
 
     def test_task_resolves_pk_params(self):
         """auto_allocate_sales_order task resolves location/shipment pks to instances."""
@@ -883,11 +1018,13 @@ class SalesOrderAutoAllocateTest(InvenTreeTestCase):
 
         order, line, _ = self._make_order(qty=10)
         excluded = StockItem.objects.create(
+            part=self.part, quantity=50, location=self.loc_b
+        )
+        included = StockItem.objects.create(
             part=self.part, quantity=50, location=self.loc_a
         )
-        included = StockItem.objects.create(part=self.part, quantity=50)
 
-        auto_allocate_sales_order(order.pk, exclude_location_id=self.loc_a.pk)
+        auto_allocate_sales_order(order.pk, exclude_location_id=self.loc_b.pk)
 
         allocs = SalesOrderAllocation.objects.filter(line=line)
         self.assertTrue(allocs.exists())

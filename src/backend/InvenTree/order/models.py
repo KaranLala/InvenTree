@@ -1814,12 +1814,17 @@ class SalesOrder(TotalPriceMixin, TaxMixin, Order):
     ):
         """Automatically allocate stock items against this SalesOrder.
 
-        For each unallocated line item, finds available stock for
-        the line's part, filtered and sorted according to the supplied kwargs, then
-        creates SalesOrderAllocation records in bulk.
+        For each unallocated line item, finds available stock for the line's part
+        within the line's own 'location' tree, filtered and sorted according to the
+        supplied kwargs, then creates SalesOrderAllocation records in bulk.
+
+        Lines without a location are skipped and reported with status 'no_location'.
+        Lines whose location cannot fully cover the requirement are allocated as far
+        as possible and reported with status 'partial' (or 'no_stock').
 
         Arguments:
-            location: If provided, only consider stock within this location tree.
+            location: If provided, further restrict stock to this location tree
+                (intersected with each line's own location tree).
             exclude_location: If provided, exclude stock within this location tree.
             shipment: Optional shipment to assign allocations to.
             line_ids: If provided, only allocate against these specific line item PKs.
@@ -1828,12 +1833,19 @@ class SalesOrder(TotalPriceMixin, TaxMixin, Order):
             interchangeable (bool): If True (default), consume stock from multiple
                 items/locations to satisfy a line. If False, only allocate when a
                 single item can cover the full remaining quantity.
+
+        Returns:
+            list of dicts, one per line item which required allocation:
+            {line, part, part_name, location, location_name,
+             required, allocated, available, status}
+            where status is one of 'allocated', 'partial', 'no_stock', 'no_location'.
         """
         stock_sort_by = kwargs.get('stock_sort_by', STOCK_SORT_DEFAULT)
         interchangeable = kwargs.get('interchangeable', True)
         serialized_stock = kwargs.get('serialized_stock', SERIALIZED_STOCK_DEFAULT)
 
         new_allocations = []
+        results = []
 
         lines = self.lines.all()
         if line_ids:
@@ -1851,9 +1863,41 @@ class SalesOrder(TotalPriceMixin, TaxMixin, Order):
             if unallocated <= 0:
                 continue
 
+            result = {
+                'line': line_item.pk,
+                'part': line_item.part.pk,
+                'part_name': line_item.part.full_name,
+                'location': line_item.location.pk if line_item.location else None,
+                'location_name': line_item.location.pathstring
+                if line_item.location
+                else None,
+                'required': float(unallocated),
+                'allocated': 0.0,
+                'available': 0.0,
+                'status': 'no_stock',
+            }
+            results.append(result)
+
+            if not line_item.location:
+                result['status'] = 'no_location'
+                continue
+
             available_stock = stock.models.StockItem.objects.filter(
                 stock.models.StockItem.IN_STOCK_FILTER, part=line_item.part
             )
+
+            # Only allocate from the line's own location tree
+            line_sublocations = line_item.location.get_descendants(include_self=True)
+            available_stock = available_stock.filter(
+                location__in=list(line_sublocations)
+            )
+
+            # Stock location tenant must match the order tenant
+            # (bulk_create below bypasses SalesOrderAllocation.clean)
+            if self.tenant_id:
+                available_stock = available_stock.filter(
+                    location__tenant_id=self.tenant_id
+                )
 
             if location:
                 sublocations = location.get_descendants(include_self=True)
@@ -1884,31 +1928,32 @@ class SalesOrder(TotalPriceMixin, TaxMixin, Order):
             else:
                 available_stock = available_stock.order_by(stock_sort_by)
 
-            stock_count = available_stock.count()
+            # Single pass: collect stock items with their unallocated quantities,
+            # preserving the sort order
+            stock_quantities = []
+            for stock_item in available_stock:
+                available_qty = stock_item.unallocated_quantity()
+                if available_qty > 0:
+                    stock_quantities.append((stock_item, available_qty))
 
-            if stock_count == 0:
+            result['available'] = float(sum(qty for _, qty in stock_quantities))
+
+            if not stock_quantities:
                 continue
 
-            if not interchangeable and stock_count > 1:
+            if not interchangeable and len(stock_quantities) > 1:
                 # Only allocate when a single item can fully cover the requirement.
                 single = next(
-                    (
-                        s
-                        for s in available_stock
-                        if s.unallocated_quantity() >= unallocated
-                    ),
+                    ((s, qty) for s, qty in stock_quantities if qty >= unallocated),
                     None,
                 )
                 if single is None:
                     continue
-                available_stock = [single]
+                stock_quantities = [single]
 
-            for stock_item in available_stock:
-                available_qty = stock_item.unallocated_quantity()
+            allocated_total = Decimal(0)
 
-                if available_qty <= 0:
-                    continue
-
+            for stock_item, available_qty in stock_quantities:
                 quantity = min(unallocated, available_qty)
 
                 new_allocations.append(
@@ -1921,11 +1966,21 @@ class SalesOrder(TotalPriceMixin, TaxMixin, Order):
                 )
 
                 unallocated -= quantity
+                allocated_total += quantity
 
                 if unallocated <= 0:
                     break
 
+            result['allocated'] = float(allocated_total)
+
+            if unallocated <= 0:
+                result['status'] = 'allocated'
+            elif allocated_total > 0:
+                result['status'] = 'partial'
+
         SalesOrderAllocation.objects.bulk_create(new_allocations, batch_size=250)
+
+        return results
 
     def is_completed(self) -> bool:
         """Check if this order is "shipped" (all line items delivered).
@@ -2633,6 +2688,7 @@ class SalesOrderLineItem(OrderLineItem, TaxLineItemMixin):
     Attributes:
         order: Link to the SalesOrder that this line item belongs to
         part: Link to a Part object (may be null)
+        location: Stock location from which stock is allocated for this line item
         sale_price: The unit sale price for this OrderLineItem
         shipped: The number of items which have actually shipped against this line item
     """
@@ -2670,6 +2726,17 @@ class SalesOrderLineItem(OrderLineItem, TaxLineItemMixin):
                     'part': _('Only salable parts can be assigned to a sales order')
                 })
 
+        if (
+            self.location
+            and self.order_id
+            and self.location.tenant_id
+            and self.order.tenant_id
+            and self.location.tenant_id != self.order.tenant_id
+        ):
+            raise ValidationError({
+                'location': _('Stock location tenant does not match order tenant')
+            })
+
     order = models.ForeignKey(
         SalesOrder,
         on_delete=models.CASCADE,
@@ -2686,6 +2753,16 @@ class SalesOrderLineItem(OrderLineItem, TaxLineItemMixin):
         verbose_name=_('Part'),
         help_text=_('Part'),
         limit_choices_to={'salable': True},
+    )
+
+    location = TreeForeignKey(
+        'stock.StockLocation',
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name='so_lines',
+        verbose_name=_('Stock Location'),
+        help_text=_('Stock location from which to allocate stock for this line'),
     )
 
     sale_price = InvenTreeModelMoneyField(

@@ -1176,45 +1176,35 @@ class SalesOrderAllocate(SalesOrderContextMixin, CreateAPI):
 class SalesOrderAutoAllocate(SalesOrderContextMixin, CreateAPI):
     """API endpoint to automatically allocate stock against a SalesOrder.
 
-    - Offloads work to a background task and returns task detail
+    - Allocates synchronously and returns per-line allocation results
+    - Each line item is allocated only from its own stock location
     """
 
     serializer_class = serializers.SalesOrderAutoAllocationSerializer
 
-    @extend_schema(responses={200: common.serializers.TaskDetailSerializer})
+    @extend_schema(
+        responses={200: serializers.SalesOrderAutoAllocationResponseSerializer}
+    )
     def post(self, *args, **kwargs):
-        """Validate parameters and offload auto-allocation to a background task."""
-        from InvenTree.tasks import offload_task
-        from order.tasks import auto_allocate_sales_order
-
+        """Validate parameters, allocate stock and return per-line results."""
         order_obj = self.get_object()
         serializer = self.get_serializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        # Extract related models from the validated data
-        location = data.get('location')
-        exclude_location = data.get('exclude_location')
-        shipment = data.get('shipment')
         line_items = data.get('line_items', [])
 
-        # Offload to the background worker
-        # Note: We provide the model ID values, not the model instances
-        task_id = offload_task(
-            auto_allocate_sales_order,
-            order_obj.pk,
-            location_id=location.pk if location else None,
-            exclude_location_id=exclude_location.pk if exclude_location else None,
-            shipment_id=shipment.pk if shipment else None,
+        results = order_obj.auto_allocate_stock(
+            location=data.get('location'),
+            exclude_location=data.get('exclude_location'),
+            shipment=data.get('shipment'),
             line_ids=[item.pk for item in line_items] if line_items else None,
             interchangeable=data['interchangeable'],
             stock_sort_by=data['stock_sort_by'],
             serialized_stock=data['serialized_stock'],
-            group='sales_order',
         )
 
-        response = common.serializers.TaskDetailSerializer.from_task(task_id).data
-        return Response(response, status=response['http_status'])
+        return Response({'results': results}, status=200)
 
 
 class SalesOrderAllocationFilter(FilterSet):

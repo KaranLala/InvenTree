@@ -39,7 +39,6 @@ import {
   useSalesOrderAutoAllocateFields,
   useSalesOrderLineItemFields
 } from '../../forms/SalesOrderForms';
-import useBackgroundTask from '../../hooks/UseBackgroundTask';
 import {
   useCreateApiFormModal,
   useDeleteApiFormModal,
@@ -353,17 +352,6 @@ export default function SalesOrderLineItemTable({
     }
   });
 
-  const [allocateTaskId, setAllocateTaskId] = useState<string>('');
-
-  useBackgroundTask({
-    taskId: allocateTaskId,
-    message: t`Allocating stock to sales order`,
-    successMessage: t`Stock allocation complete`,
-    onSuccess: () => {
-      table.refreshTable();
-    }
-  });
-
   const [autoAllocateInitialData, setAutoAllocateInitialData] = useState<any>(
     {}
   );
@@ -393,9 +381,10 @@ export default function SalesOrderLineItemTable({
     fields: useSalesOrderAutoAllocateFields({ orderId }),
     initialData: autoAllocateInitialData,
     preFormContent: autoAllocatePreFormContent,
-    successMessage: null,
-    onFormSuccess: (response: any) => {
-      setAllocateTaskId(response.task_id);
+    successMessage: t`Stock allocation complete`,
+    onFormSuccess: () => {
+      // Allocation runs synchronously - results are committed on response
+      table.refreshTable();
     }
   });
 

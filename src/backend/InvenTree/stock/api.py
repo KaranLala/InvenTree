@@ -2,10 +2,13 @@
 
 from collections import OrderedDict
 from datetime import timedelta
+from decimal import Decimal
 
+from django.contrib.postgres.aggregates import JSONBAgg
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
-from django.db.models import F, Q
+from django.db.models import Count, F, Q, Sum, Value
+from django.db.models.functions import Coalesce, JSONObject
 from django.urls import include, path
 from django.utils.translation import gettext_lazy as _
 
@@ -17,6 +20,7 @@ from rest_framework import status
 from rest_framework.generics import GenericAPIView
 from rest_framework.response import Response
 from rest_framework.serializers import ValidationError
+from sql_util.utils import SubquerySum
 
 import common.filters
 import common.models
@@ -1370,6 +1374,103 @@ class StockList(
     ]
 
 
+class StockAggregateList(ListAPI):
+    """Fork-specific: list stock grouped by (part, location, serial).
+
+    Multiple discrete StockItem records of the same part in the same location
+    are collapsed into a single row with a summed available quantity, so the FZ
+    app's stock browser reads as one row per part+location. Serialized items
+    keep their own row because the serial is part of the group key.
+
+    Reuses StockFilter + the StockList search fields, so 'search', 'location'
+    (+ 'cascade'), 'in_stock', 'tenant' and 'part' behave identically to the
+    regular stock list endpoint.
+    """
+
+    queryset = StockItem.objects.all()
+    serializer_class = StockSerializers.StockAggregateSerializer
+    filterset_class = StockFilter
+    filter_backends = SEARCH_ORDER_FILTER
+
+    # Mirror StockList.search_fields so text search matches the same columns.
+    search_fields = [
+        'serial',
+        'batch',
+        'location__name',
+        'part__name',
+        'part__IPN',
+        'part__description',
+        'supplier_part__SKU',
+        'supplier_part__supplier__name',
+        'supplier_part__manufacturer_part__MPN',
+        'supplier_part__manufacturer_part__manufacturer__name',
+        'tags__name',
+        'tags__slug',
+    ]
+
+    # Ordering is applied by aggregate_queryset() (grouped rows), so expose no
+    # OrderingFilter fields here.
+    ordering_fields = []
+
+    def aggregate_queryset(self, queryset):
+        """Collapse the (already filtered) StockItem queryset into groups.
+
+        Grouped by (part, location, normalized serial). NULL and '' serials are
+        normalized together so all non-serialized/batched items of a
+        part+location merge into one row, while each serialized item forms its
+        own singleton group.
+        """
+        # Per-item allocated quantity, mirroring
+        # StockItemSerializer.annotate_queryset (sales-order + build allocations,
+        # transfer-order allocations intentionally excluded). SubquerySum yields a
+        # scalar per stock item, so Sum() below aggregates it without the
+        # multi-join row inflation a related-field Sum() would cause.
+        alloc = Coalesce(
+            SubquerySum('sales_order_allocations__quantity'), Value(Decimal(0))
+        ) + Coalesce(SubquerySum('allocations__quantity'), Value(Decimal(0)))
+
+        return (
+            queryset.values(
+                'part',
+                'location',
+                'part__name',
+                'part__IPN',
+                'location__pathstring',
+                serial_key=Coalesce('serial', Value('')),
+            )
+            .annotate(
+                total_quantity=Sum('quantity'),
+                total_allocated=Sum(alloc),
+                item_count=Count('pk'),
+                members=JSONBAgg(
+                    JSONObject(
+                        pk=F('pk'),
+                        quantity=F('quantity'),
+                        batch=F('batch'),
+                        serial=F('serial'),
+                        status=F('status'),
+                        status_custom_key=F('status_custom_key'),
+                    )
+                ),
+            )
+            .annotate(available=F('total_quantity') - F('total_allocated'))
+            .order_by('part__name', 'location__pathstring', 'serial_key')
+        )
+
+    def list(self, request, *args, **kwargs):
+        """Filter, then group, then paginate the grouped rows."""
+        queryset = self.filter_queryset(self.get_queryset())
+        grouped = self.aggregate_queryset(queryset)
+
+        page = self.paginate_queryset(grouped)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(grouped, many=True)
+        return Response(serializer.data)
+
+
 class StockDetail(StockApiMixin, OutputOptionsMixin, RetrieveUpdateDestroyAPI):
     """API detail endpoint for a single StockItem instance."""
 
@@ -1806,6 +1907,12 @@ stock_api_urls = [
         StatusView.as_view(),
         {StatusView.MODEL_REF: StockStatus},
         name='api-stock-status-codes',
+    ),
+    # Stock grouped by (part, location) — fork-specific, used by the FZ app
+    path(
+        'aggregate/',
+        StockAggregateList.as_view(),
+        name='api-stock-aggregate-list',
     ),
     # Anything else
     path('', StockList.as_view(), name='api-stock-list'),

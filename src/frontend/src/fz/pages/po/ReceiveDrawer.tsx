@@ -3,7 +3,6 @@ import {
   Drawer,
   Group,
   NumberInput,
-  Select,
   Stack,
   Table,
   Text,
@@ -18,11 +17,8 @@ import { apiUrl } from '@lib/functions/Api';
 import { formatDecimal } from '@lib/functions/Formatting';
 import { useApi } from '../../../contexts/ApiContext';
 import { extractErrorMessage } from '../../api/errors';
-import {
-  listResults,
-  useBranchQuery,
-  useInvalidateBranch
-} from '../../api/useBranchQuery';
+import { useInvalidateBranch } from '../../api/useBranchQuery';
+import FzLocationSelect from '../../components/FzLocationSelect';
 
 /**
  * Receive purchase order lines into a location of the active branch.
@@ -55,22 +51,6 @@ export default function ReceiveDrawer({
   );
   const [batches, setBatches] = useState<Record<number, string>>({});
   const [destination, setDestination] = useState<string | null>(null);
-
-  const { data: locationData } = useBranchQuery({
-    key: ['stock-locations', 'receive-destinations'],
-    endpoint: ApiEndpoints.stock_location_list,
-    params: { structural: false },
-    enabled: opened
-  });
-
-  const locationOptions = useMemo(
-    () =>
-      listResults(locationData).map((location: any) => ({
-        value: String(location.pk),
-        label: location.pathstring || location.name
-      })),
-    [locationData]
-  );
 
   useEffect(() => {
     if (opened) {
@@ -127,13 +107,12 @@ export default function ReceiveDrawer({
       size='xl'
     >
       <Stack>
-        <Select
+        <FzLocationSelect
           label='Destination location'
           description='Locations in the active branch'
-          data={locationOptions}
           value={destination}
           onChange={setDestination}
-          searchable
+          enabled={opened}
           required
           aria-label='receive-destination'
         />

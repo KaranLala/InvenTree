@@ -1338,6 +1338,216 @@ class StockItemListTest(StockAPITestCase):
             self.assertEqual(item['part_detail']['total_in_stock'], expected_total)
 
 
+class StockAggregateListTest(StockAPITestCase):
+    """Tests for the fork-specific grouped stock endpoint (stock/aggregate/).
+
+    Rows are grouped by (part, location, serial): multiple non-serialized stock
+    items of the same part in the same location collapse into a single row with
+    a summed available quantity, while serialized items stay on their own rows.
+    """
+
+    url = reverse('api-stock-aggregate-list')
+
+    def get_rows(self, **kwargs):
+        """Fetch grouped rows (unpaginated → a plain list)."""
+        response = self.client.get(self.url, format='json', data=kwargs)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        return response.data
+
+    def test_grouping_and_serialized(self):
+        """Non-serialized items merge per (part, location); serials stay split."""
+        part = Part.objects.create(
+            name='Aggregate Widget',
+            description='A widget for aggregation tests',
+            salable=True,
+            trackable=True,
+        )
+        location = StockLocation.objects.create(name='Agg Location')
+
+        # Three non-serialized items of this part in this location
+        for qty in (2, 3, 5):
+            StockItem.objects.create(part=part, location=location, quantity=qty)
+
+        # Two serialized items (each quantity 1, unique serial)
+        StockItem.objects.create(
+            part=part, location=location, quantity=1, serial='SN-A'
+        )
+        StockItem.objects.create(
+            part=part, location=location, quantity=1, serial='SN-B'
+        )
+
+        rows = [r for r in self.get_rows(part=part.pk) if r['location'] == location.pk]
+
+        # One merged non-serial group + two serialized singletons
+        self.assertEqual(len(rows), 3)
+
+        non_serial = [r for r in rows if not r['serial']]
+        self.assertEqual(len(non_serial), 1)
+        group = non_serial[0]
+        self.assertEqual(group['item_count'], 3)
+        self.assertEqual(len(group['members']), 3)
+        self.assertEqual(float(group['total_quantity']), 10.0)
+        self.assertEqual(float(group['available']), 10.0)
+        self.assertEqual(group['part_name'], part.name)
+
+        serial_rows = sorted(
+            (r for r in rows if r['serial']), key=lambda r: r['serial']
+        )
+        self.assertEqual([r['serial'] for r in serial_rows], ['SN-A', 'SN-B'])
+        for r in serial_rows:
+            self.assertEqual(r['item_count'], 1)
+            self.assertEqual(float(r['total_quantity']), 1.0)
+
+    def test_filters(self):
+        """The location, search and tenant filters narrow the grouped rows."""
+        from tenant.models import Tenant
+
+        part = Part.objects.create(
+            name='Filterable Gizmo',
+            description='A gizmo for filter tests',
+            salable=True,
+        )
+
+        tenant_a = Tenant.objects.create(name='Agg Branch A', code='AGGA')
+        tenant_b = Tenant.objects.create(name='Agg Branch B', code='AGGB')
+
+        loc_a = StockLocation.objects.create(name='Agg Loc A', tenant=tenant_a)
+        loc_b = StockLocation.objects.create(name='Agg Loc B', tenant=tenant_b)
+
+        StockItem.objects.create(part=part, location=loc_a, quantity=4)
+        StockItem.objects.create(part=part, location=loc_a, quantity=6)
+        StockItem.objects.create(part=part, location=loc_b, quantity=7)
+
+        # Location filter (no cascade) → only loc_a's merged group
+        rows = self.get_rows(part=part.pk, location=loc_a.pk, cascade=False)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['location'], loc_a.pk)
+        self.assertEqual(float(rows[0]['total_quantity']), 10.0)
+
+        # Tenant (branch) filter → only that branch's stock
+        rows = self.get_rows(part=part.pk, tenant=tenant_b.pk)
+        self.assertEqual({r['location'] for r in rows}, {loc_b.pk})
+
+        # Search by part name finds the group
+        rows = self.get_rows(search='Filterable Gizmo')
+        self.assertTrue(any(r['part'] == part.pk for r in rows))
+
+    def test_allocation_not_inflated(self):
+        """Multiple allocation rows on one item must not inflate total_quantity.
+
+        Guards against the classic Django multi-join aggregation bug: summing a
+        related field (allocations) alongside Sum('quantity') would multiply the
+        quantity by the number of allocation rows. The endpoint uses correlated
+        subqueries to avoid this.
+        """
+        from order.models import (
+            SalesOrder,
+            SalesOrderAllocation,
+            SalesOrderLineItem,
+            SalesOrderShipment,
+        )
+
+        customer = company.models.Company.objects.create(
+            name='Agg Customer', description='c', is_customer=True
+        )
+        part = Part.objects.create(
+            name='Allocatable Part',
+            description='A part to allocate',
+            salable=True,
+        )
+        location = StockLocation.objects.create(name='Alloc Location')
+
+        item = StockItem.objects.create(part=part, location=location, quantity=10)
+
+        order = SalesOrder.objects.create(customer=customer, reference='SO-AGG-1')
+        shipment = SalesOrderShipment.objects.create(order=order, reference='S1')
+
+        # Two separate lines each allocate from the SAME stock item → two
+        # allocation rows attached to one item.
+        line1 = SalesOrderLineItem.objects.create(order=order, part=part, quantity=3)
+        line2 = SalesOrderLineItem.objects.create(order=order, part=part, quantity=2)
+        SalesOrderAllocation.objects.create(
+            line=line1, item=item, quantity=3, shipment=shipment
+        )
+        SalesOrderAllocation.objects.create(
+            line=line2, item=item, quantity=2, shipment=shipment
+        )
+
+        rows = [r for r in self.get_rows(part=part.pk) if r['location'] == location.pk]
+        self.assertEqual(len(rows), 1)
+        group = rows[0]
+        self.assertEqual(group['item_count'], 1)
+        self.assertEqual(len(group['members']), 1)
+        # Quantity is NOT doubled by the two allocation rows
+        self.assertEqual(float(group['total_quantity']), 10.0)
+        self.assertEqual(float(group['total_allocated']), 5.0)
+        self.assertEqual(float(group['available']), 5.0)
+
+    def test_pagination_counts_groups(self):
+        """With a limit, the paginated 'count' reflects groups, not stock items.
+
+        This is the reason the grouping is done server-side: pagination and the
+        total count must be correct across pages.
+        """
+        part = Part.objects.create(
+            name='Paginated Part', description='p', salable=True
+        )
+        # Three locations, each holding two stock items of the part → three
+        # groups made of six underlying stock items.
+        locations = [
+            StockLocation.objects.create(name=f'Page Loc {i}') for i in range(3)
+        ]
+        for loc in locations:
+            StockItem.objects.create(part=part, location=loc, quantity=1)
+            StockItem.objects.create(part=part, location=loc, quantity=1)
+
+        response = self.client.get(
+            self.url, format='json', data={'part': part.pk, 'limit': 2, 'offset': 0}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Paginated response: count is the number of GROUPS (3), not items (6)
+        self.assertEqual(response.data['count'], 3)
+        self.assertEqual(len(response.data['results']), 2)
+
+    def test_no_location_group(self):
+        """Items without a location group together under location='null'."""
+        part = Part.objects.create(
+            name='Homeless Part', description='h', salable=True
+        )
+        StockItem.objects.create(part=part, location=None, quantity=4)
+        StockItem.objects.create(part=part, location=None, quantity=6)
+
+        rows = [
+            r
+            for r in self.get_rows(part=part.pk, location='null', cascade=False)
+            if r['part'] == part.pk
+        ]
+        self.assertEqual(len(rows), 1)
+        self.assertIsNone(rows[0]['location'])
+        self.assertEqual(rows[0]['item_count'], 2)
+        self.assertEqual(float(rows[0]['total_quantity']), 10.0)
+
+    def test_cascade_includes_sublocations(self):
+        """cascade=True pulls in child-location stock as its own group."""
+        part = Part.objects.create(
+            name='Cascade Part', description='c', salable=True
+        )
+        parent = StockLocation.objects.create(name='Cascade Parent')
+        child = StockLocation.objects.create(name='Cascade Child', parent=parent)
+
+        StockItem.objects.create(part=part, location=parent, quantity=2)
+        StockItem.objects.create(part=part, location=child, quantity=3)
+
+        # Without cascade → only the parent location group
+        rows = self.get_rows(part=part.pk, location=parent.pk, cascade=False)
+        self.assertEqual({r['location'] for r in rows}, {parent.pk})
+
+        # With cascade → parent + child location groups (kept separate)
+        rows = self.get_rows(part=part.pk, location=parent.pk, cascade=True)
+        self.assertEqual({r['location'] for r in rows}, {parent.pk, child.pk})
+
+
 class CustomStockItemStatusTest(StockAPITestCase):
     """Tests for custom stock item statuses."""
 

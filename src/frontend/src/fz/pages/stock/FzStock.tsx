@@ -21,6 +21,7 @@ import { useDebouncedValue } from '@mantine/hooks';
 import {
   IconAdjustments,
   IconExternalLink,
+  IconPlus,
   IconSearch,
   IconTransfer
 } from '@tabler/icons-react';
@@ -35,6 +36,7 @@ import { useBranchQuery } from '../../api/useBranchQuery';
 import { useBranchState } from '../../state/BranchState';
 import AdjustModal, { type AdjustMode } from './AdjustModal';
 import LocationTree from './LocationTree';
+import NewStockModal from './NewStockModal';
 import TransferModal from './TransferModal';
 
 const PAGE_SIZE = 50;
@@ -53,11 +55,13 @@ export default function FzStock() {
     undefined
   );
   const [page, setPage] = useState(1);
-  const [selection, setSelection] = useState<Set<number>>(new Set());
+  // Selection is keyed by group (part + location + serial), not stock item pk
+  const [selection, setSelection] = useState<Set<string>>(new Set());
 
   const [modalItems, setModalItems] = useState<any[]>([]);
   const [adjustMode, setAdjustMode] = useState<AdjustMode | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [newStockOpen, setNewStockOpen] = useState(false);
 
   // The "no location" view is branch-independent: those items have no
   // branch, and the tenant filter would exclude them
@@ -65,12 +69,9 @@ export default function FzStock() {
 
   const queryParams: Record<string, any> = {
     search: debouncedSearch || undefined,
-    part_detail: true,
-    location_detail: true,
     in_stock: true,
     limit: PAGE_SIZE,
-    offset: (page - 1) * PAGE_SIZE,
-    ordering: 'part'
+    offset: (page - 1) * PAGE_SIZE
   };
 
   if (noLocation) {
@@ -81,9 +82,11 @@ export default function FzStock() {
     queryParams.cascade = true;
   }
 
+  // Rows are grouped by part + location (serialized items stay separate); the
+  // backend sums available across the underlying stock items of each group.
   const { data, isLoading, isFetching } = useBranchQuery({
-    key: ['stock-items', debouncedSearch, location, page],
-    endpoint: ApiEndpoints.stock_item_list,
+    key: ['stock-aggregate', debouncedSearch, location, page],
+    endpoint: ApiEndpoints.stock_item_aggregate,
     params: queryParams,
     scoped: !noLocation
   });
@@ -101,30 +104,44 @@ export default function FzStock() {
   });
   const noLocationCount: number = noLocationData?.count ?? 0;
 
-  const selectedItems = useMemo(
-    () => items.filter((item) => selection.has(item.pk)),
+  // Stable key for a grouped row (part + location + serial)
+  const groupKey = (row: any) =>
+    `${row.part}-${row.location ?? 'null'}-${row.serial ?? ''}`;
+
+  // Expand a grouped row into the underlying stock items, enriched with the
+  // display fields the adjust/transfer modals expect (they render one row per
+  // item, keyed by pk + quantity).
+  const membersOf = (row: any): any[] =>
+    (row.members ?? []).map((member: any) => ({
+      ...member,
+      part_detail: { full_name: row.part_name },
+      location_detail: { pathstring: row.location_name }
+    }));
+
+  const selectedRows = useMemo(
+    () => items.filter((row) => selection.has(groupKey(row))),
     [items, selection]
   );
 
-  const toggleSelection = (pk: number) => {
+  const toggleSelection = (key: string) => {
     setSelection((current) => {
       const next = new Set(current);
-      if (next.has(pk)) {
-        next.delete(pk);
+      if (next.has(key)) {
+        next.delete(key);
       } else {
-        next.add(pk);
+        next.add(key);
       }
       return next;
     });
   };
 
   const openAdjust = (rows: any[], mode: AdjustMode) => {
-    setModalItems(rows);
+    setModalItems(rows.flatMap(membersOf));
     setAdjustMode(mode);
   };
 
   const openTransfer = (rows: any[]) => {
-    setModalItems(rows);
+    setModalItems(rows.flatMap(membersOf));
     setTransferOpen(true);
   };
 
@@ -133,9 +150,6 @@ export default function FzStock() {
     setTransferOpen(false);
     setSelection(new Set());
   };
-
-  const available = (item: any) =>
-    Number(item.quantity) - Number(item.allocated ?? 0);
 
   return (
     <Stack>
@@ -163,7 +177,7 @@ export default function FzStock() {
                 size='compact-sm'
                 variant='light'
                 leftSection={<IconAdjustments size={16} />}
-                onClick={() => openAdjust(selectedItems, 'count')}
+                onClick={() => openAdjust(selectedRows, 'count')}
               >
                 Count ({selection.size})
               </Button>
@@ -171,12 +185,20 @@ export default function FzStock() {
                 size='compact-sm'
                 variant='light'
                 leftSection={<IconTransfer size={16} />}
-                onClick={() => openTransfer(selectedItems)}
+                onClick={() => openTransfer(selectedRows)}
               >
                 Transfer ({selection.size})
               </Button>
             </>
           )}
+          <Button
+            size='compact-sm'
+            leftSection={<IconPlus size={16} />}
+            onClick={() => setNewStockOpen(true)}
+            data-testid='fz-add-stock'
+          >
+            Add stock
+          </Button>
         </Group>
       </Group>
       <Grid>
@@ -233,128 +255,160 @@ export default function FzStock() {
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
-                    {items.map((item) => (
-                      <Table.Tr key={item.pk}>
-                        <Table.Td>
-                          <Checkbox
-                            size='xs'
-                            checked={selection.has(item.pk)}
-                            onChange={() => toggleSelection(item.pk)}
-                            aria-label={`select-stock-${item.pk}`}
-                          />
-                        </Table.Td>
-                        <Table.Td>
-                          <Group gap='xs' wrap='nowrap'>
-                            <Avatar
-                              src={item.part_detail?.thumbnail}
-                              size='sm'
-                              radius='sm'
+                    {items.map((row) => {
+                      const key = groupKey(row);
+                      const members: any[] = row.members ?? [];
+                      const batches = Array.from(
+                        new Set(
+                          members
+                            .map((member) => member.batch)
+                            .filter((batch) => batch)
+                        )
+                      );
+                      const statuses = Array.from(
+                        new Set(
+                          members.map(
+                            (member) =>
+                              member.status_custom_key ?? member.status
+                          )
+                        )
+                      );
+                      const batchLabel = row.serial
+                        ? `# ${row.serial}`
+                        : batches.length === 0
+                          ? '-'
+                          : batches.length === 1
+                            ? batches[0]
+                            : `${batches.length} batches`;
+                      const openTarget =
+                        row.item_count === 1 && members[0]
+                          ? `/stock/item/${members[0].pk}`
+                          : row.location != null
+                            ? `/stock/location/${row.location}`
+                            : `/part/${row.part}/`;
+                      return (
+                        <Table.Tr key={key}>
+                          <Table.Td>
+                            <Checkbox
+                              size='xs'
+                              checked={selection.has(key)}
+                              onChange={() => toggleSelection(key)}
+                              aria-label={`select-stock-${key}`}
                             />
-                            <div>
+                          </Table.Td>
+                          <Table.Td>
+                            <Group gap='xs' wrap='nowrap'>
+                              <Avatar size='sm' radius='sm' />
+                              <div>
+                                <Group gap={6} wrap='nowrap'>
+                                  <Text size='sm' fw={500}>
+                                    {row.part_name}
+                                  </Text>
+                                  {row.item_count > 1 && (
+                                    <Badge
+                                      size='xs'
+                                      variant='light'
+                                      color='gray'
+                                    >
+                                      ×{row.item_count}
+                                    </Badge>
+                                  )}
+                                </Group>
+                                {row.part_IPN && (
+                                  <Text size='xs' c='dimmed'>
+                                    {row.part_IPN}
+                                  </Text>
+                                )}
+                              </div>
+                            </Group>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size='sm'>{row.location_name ?? '-'}</Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Group gap={4} wrap='nowrap'>
                               <Text size='sm' fw={500}>
-                                {item.part_detail?.full_name}
+                                {formatDecimal(Number(row.available))}
                               </Text>
-                              {item.part_detail?.IPN && (
+                              {Number(row.total_allocated ?? 0) > 0 && (
                                 <Text size='xs' c='dimmed'>
-                                  {item.part_detail.IPN}
+                                  / {formatDecimal(Number(row.total_quantity))}
                                 </Text>
                               )}
-                            </div>
-                          </Group>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size='sm'>
-                            {item.location_detail?.pathstring ?? '-'}
-                          </Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <Group gap={4} wrap='nowrap'>
-                            <Text size='sm' fw={500}>
-                              {formatDecimal(available(item))}
-                            </Text>
-                            {Number(item.allocated ?? 0) > 0 && (
-                              <Text size='xs' c='dimmed'>
-                                / {formatDecimal(Number(item.quantity))}
+                            </Group>
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size='sm'>{batchLabel}</Text>
+                          </Table.Td>
+                          <Table.Td>
+                            {statuses.length === 1 ? (
+                              <StatusRenderer
+                                status={statuses[0]}
+                                type={ModelType.stockitem}
+                              />
+                            ) : (
+                              <Text size='sm' c='dimmed'>
+                                —
                               </Text>
                             )}
-                            {item.part_detail?.units && (
-                              <Text size='xs' c='dimmed'>
-                                [{item.part_detail.units}]
-                              </Text>
-                            )}
-                          </Group>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size='sm'>
-                            {item.serial
-                              ? `# ${item.serial}`
-                              : (item.batch ?? '-')}
-                          </Text>
-                        </Table.Td>
-                        <Table.Td>
-                          <StatusRenderer
-                            status={item.status_custom_key ?? item.status}
-                            type={ModelType.stockitem}
-                          />
-                        </Table.Td>
-                        <Table.Td>
-                          <Group gap={4} wrap='nowrap' justify='flex-end'>
-                            <Menu position='bottom-end'>
-                              <Menu.Target>
+                          </Table.Td>
+                          <Table.Td>
+                            <Group gap={4} wrap='nowrap' justify='flex-end'>
+                              <Menu position='bottom-end'>
+                                <Menu.Target>
+                                  <ActionIcon
+                                    variant='subtle'
+                                    aria-label={`adjust-stock-${key}`}
+                                  >
+                                    <IconAdjustments size={16} />
+                                  </ActionIcon>
+                                </Menu.Target>
+                                <Menu.Dropdown>
+                                  <Menu.Item
+                                    onClick={() => openAdjust([row], 'count')}
+                                  >
+                                    Count
+                                  </Menu.Item>
+                                  <Menu.Item
+                                    onClick={() => openAdjust([row], 'add')}
+                                  >
+                                    Add
+                                  </Menu.Item>
+                                  <Menu.Item
+                                    onClick={() => openAdjust([row], 'remove')}
+                                  >
+                                    Remove
+                                  </Menu.Item>
+                                </Menu.Dropdown>
+                              </Menu>
+                              <Tooltip label='Transfer'>
                                 <ActionIcon
                                   variant='subtle'
-                                  aria-label={`adjust-stock-${item.pk}`}
+                                  onClick={() => openTransfer([row])}
+                                  aria-label={`transfer-stock-${key}`}
                                 >
-                                  <IconAdjustments size={16} />
+                                  <IconTransfer size={16} />
                                 </ActionIcon>
-                              </Menu.Target>
-                              <Menu.Dropdown>
-                                <Menu.Item
-                                  onClick={() => openAdjust([item], 'count')}
+                              </Tooltip>
+                              <Tooltip label='Open in InvenTree'>
+                                <ActionIcon
+                                  variant='subtle'
+                                  onClick={() => navigate(openTarget)}
+                                  aria-label={`open-stock-${key}`}
                                 >
-                                  Count
-                                </Menu.Item>
-                                <Menu.Item
-                                  onClick={() => openAdjust([item], 'add')}
-                                >
-                                  Add
-                                </Menu.Item>
-                                <Menu.Item
-                                  onClick={() => openAdjust([item], 'remove')}
-                                >
-                                  Remove
-                                </Menu.Item>
-                              </Menu.Dropdown>
-                            </Menu>
-                            <Tooltip label='Transfer'>
-                              <ActionIcon
-                                variant='subtle'
-                                onClick={() => openTransfer([item])}
-                                aria-label={`transfer-stock-${item.pk}`}
-                              >
-                                <IconTransfer size={16} />
-                              </ActionIcon>
-                            </Tooltip>
-                            <Tooltip label='Open in InvenTree'>
-                              <ActionIcon
-                                variant='subtle'
-                                onClick={() =>
-                                  navigate(`/stock/item/${item.pk}`)
-                                }
-                                aria-label={`open-stock-${item.pk}`}
-                              >
-                                <IconExternalLink size={16} />
-                              </ActionIcon>
-                            </Tooltip>
-                          </Group>
-                        </Table.Td>
-                      </Table.Tr>
-                    ))}
+                                  <IconExternalLink size={16} />
+                                </ActionIcon>
+                              </Tooltip>
+                            </Group>
+                          </Table.Td>
+                        </Table.Tr>
+                      );
+                    })}
                   </Table.Tbody>
                 </Table>
                 <Group justify='space-between'>
                   <Text size='sm' c='dimmed'>
-                    {totalCount} item{totalCount === 1 ? '' : 's'}
+                    {totalCount} stock line{totalCount === 1 ? '' : 's'}
                   </Text>
                   {pageCount > 1 && (
                     <Pagination
@@ -380,6 +434,11 @@ export default function FzStock() {
         items={modalItems}
         opened={transferOpen}
         onClose={closeModals}
+      />
+      <NewStockModal
+        opened={newStockOpen}
+        onClose={() => setNewStockOpen(false)}
+        defaultLocation={typeof location === 'number' ? location : null}
       />
       {activeBranchId == null && (
         <Text c='dimmed' size='sm'>

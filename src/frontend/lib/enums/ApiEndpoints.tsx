@@ -143,6 +143,7 @@ export enum ApiEndpoints {
 
   // Stock item API endpoints
   stock_item_list = 'stock/',
+  stock_item_aggregate = 'stock/aggregate/',
   stock_tracking_list = 'stock/track/',
   stock_test_result_list = 'stock/test/',
   stock_transfer = 'stock/transfer/',

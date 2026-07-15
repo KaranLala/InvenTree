@@ -6,6 +6,7 @@ import {
   Group,
   Loader,
   NumberInput,
+  Stack,
   Table,
   Text,
   TextInput,
@@ -33,6 +34,7 @@ import { extractErrorMessage } from '../../api/errors';
 import { pickPriceBreak, priceBreakHint } from '../../api/priceBreaks';
 import { effectiveOrderCurrency } from '../../api/soStatus';
 import { fzKey, useBranchQuery } from '../../api/useBranchQuery';
+import FzLocationSelect from '../../components/FzLocationSelect';
 import { useBranchState } from '../../state/BranchState';
 import AllocationRow from './AllocationPopover';
 
@@ -44,8 +46,25 @@ import AllocationRow from './AllocationPopover';
  *   because the server recomputes tax totals.
  * - A permanent ghost row at the bottom adds new lines: pick a part,
  *   the sale price auto-fills from the customer-aware price break.
+ *   A stock location is required for each new line.
  * - Each row expands to an allocation panel (branch-scoped stock).
+ * - Auto-allocate runs synchronously and only sources stock from each
+ *   line's own location; shortfalls surface in a persistent notification.
  */
+
+/** One-line description of a non-allocated auto-allocation result. */
+function allocationIssueMessage(issue: any): string {
+  const part = issue.part_name ?? `Line ${issue.line}`;
+
+  if (issue.status === 'no_location') {
+    return `${part} — no location set`;
+  }
+  if (issue.status === 'partial') {
+    return `${part} — allocated ${formatDecimal(issue.allocated)} of ${formatDecimal(issue.required)} (only ${formatDecimal(issue.available)} available at ${issue.location_name})`;
+  }
+  return `${part} — no stock at ${issue.location_name}`;
+}
+
 export default function LineItemGrid({
   order,
   editable,
@@ -135,16 +154,53 @@ export default function LineItemGrid({
   });
 
   const autoAllocate = useMutation({
-    mutationFn: async () =>
-      api.post(apiUrl(ApiEndpoints.sales_order_auto_allocate, order.pk), {}),
-    onSuccess: () => {
-      notifications.show({
-        title: 'Auto-allocation started',
-        message: 'Stock is being allocated in the background',
-        color: 'blue'
-      });
-      // Background task: refetch after a short delay
-      setTimeout(invalidateOrder, 2500);
+    mutationFn: async () => {
+      // Attach allocations to a pending shipment so the order stays shippable
+      const shipmentId = await ensureShipment();
+      return api.post(
+        apiUrl(ApiEndpoints.sales_order_auto_allocate, order.pk),
+        shipmentId ? { shipment: shipmentId } : {}
+      );
+    },
+    onSuccess: (response) => {
+      const results: any[] = response.data?.results ?? [];
+      const issues = results.filter((result) => result.status !== 'allocated');
+
+      if (results.length === 0) {
+        notifications.show({
+          title: 'Nothing to allocate',
+          message: 'All line items are already fully allocated',
+          color: 'blue'
+        });
+      } else if (issues.length === 0) {
+        notifications.show({
+          title: 'Stock allocated',
+          message: 'All line items were fully allocated',
+          color: 'green'
+        });
+      } else {
+        notifications.show({
+          title: 'Auto-allocation incomplete',
+          message: (
+            <Stack gap={2}>
+              {issues.slice(0, 8).map((issue) => (
+                <Text size='sm' key={issue.line}>
+                  {allocationIssueMessage(issue)}
+                </Text>
+              ))}
+              {issues.length > 8 && (
+                <Text size='sm' c='dimmed'>
+                  +{issues.length - 8} more
+                </Text>
+              )}
+            </Stack>
+          ),
+          color: 'yellow',
+          autoClose: false
+        });
+      }
+
+      invalidateOrder();
     },
     onError: (error) => {
       notifications.show({
@@ -176,6 +232,7 @@ export default function LineItemGrid({
           <Table.Tr>
             <Table.Th w={28} />
             <Table.Th>Part</Table.Th>
+            <Table.Th w={190}>Location</Table.Th>
             <Table.Th w={130}>Quantity</Table.Th>
             <Table.Th w={160}>Unit price</Table.Th>
             <Table.Th w={140}>Incl. tax</Table.Th>
@@ -187,7 +244,7 @@ export default function LineItemGrid({
         <Table.Tbody>
           {isLoading && (
             <Table.Tr>
-              <Table.Td colSpan={8}>
+              <Table.Td colSpan={9}>
                 <Loader size='sm' />
               </Table.Td>
             </Table.Tr>
@@ -272,6 +329,23 @@ function LineRow({
             </div>
           </Group>
         </Table.Td>
+        <Table.Td data-testid={`fz-so-line-location-${line.pk}`}>
+          {editable ? (
+            <FzLocationSelect
+              size='xs'
+              value={line.location ? String(line.location) : null}
+              onChange={(value) =>
+                onEdit({ location: value ? Number(value) : null })
+              }
+              placeholder='Location'
+              aria-label={`edit-location-${line.pk}`}
+            />
+          ) : (
+            <Text size='sm' c='dimmed'>
+              {line.location_detail?.pathstring ?? '—'}
+            </Text>
+          )}
+        </Table.Td>
         <Table.Td>
           <EditableNumberCell
             value={Number(line.quantity)}
@@ -329,7 +403,7 @@ function LineRow({
       </Table.Tr>
       {expanded && (
         <Table.Tr>
-          <Table.Td colSpan={8} p='sm' bg='var(--mantine-color-default-hover)'>
+          <Table.Td colSpan={9} p='sm' bg='var(--mantine-color-default-hover)'>
             <AllocationRow
               order={order}
               line={line}
@@ -434,6 +508,7 @@ function GhostRow({
   const api = useApi();
 
   const [part, setPart] = useState<any>(null);
+  const [location, setLocation] = useState<string | null>(null);
   const [quantity, setQuantity] = useState<number | ''>(1);
   const [price, setPrice] = useState<number | ''>('');
   const [priceHint, setPriceHint] = useState<string | null>(null);
@@ -466,12 +541,14 @@ function GhostRow({
       api.post(apiUrl(ApiEndpoints.sales_order_line_list), {
         order: order.pk,
         part: part.pk,
+        location: Number(location),
         quantity: quantity,
         sale_price: price === '' ? undefined : price,
         sale_price_currency: currency
       }),
     onSuccess: () => {
       setPart(null);
+      setLocation(null);
       setQuantity(1);
       setPrice('');
       setPriceHint(null);
@@ -488,7 +565,7 @@ function GhostRow({
   });
 
   const submit = () => {
-    if (part && quantity !== '' && Number(quantity) > 0) {
+    if (part && location != null && quantity !== '' && Number(quantity) > 0) {
       createMutation.mutate();
     }
   };
@@ -498,6 +575,16 @@ function GhostRow({
       <Table.Td />
       <Table.Td>
         <PartSearchCombobox value={part} onChange={setPart} />
+      </Table.Td>
+      <Table.Td>
+        <FzLocationSelect
+          size='xs'
+          value={location}
+          onChange={setLocation}
+          placeholder='Location'
+          required
+          aria-label='new-line-location'
+        />
       </Table.Td>
       <Table.Td>
         <NumberInput
@@ -531,7 +618,7 @@ function GhostRow({
           size='compact-xs'
           onClick={submit}
           loading={createMutation.isPending}
-          disabled={!part || quantity === ''}
+          disabled={!part || location == null || quantity === ''}
           data-testid='fz-so-add-line'
         >
           Add

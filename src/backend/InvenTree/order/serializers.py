@@ -1361,6 +1361,8 @@ class SalesOrderLineItemSerializer(
             'overdue',
             'part',
             'part_detail',
+            'location',
+            'location_detail',
             'sale_price',
             'sale_price_currency',
             'shipped',
@@ -1513,6 +1515,18 @@ class SalesOrderLineItemSerializer(
             'allow_null': True,
         },
         prefetch_fields=['order__customer'],
+    )
+
+    location_detail = OptionalField(
+        serializer_class=stock.serializers.LocationBriefSerializer,
+        serializer_kwargs={
+            'source': 'location',
+            'many': False,
+            'read_only': True,
+            'allow_null': True,
+        },
+        default_include=True,
+        prefetch_fields=['location'],
     )
 
     # Annotated fields
@@ -2194,7 +2208,7 @@ class SalesOrderAutoAllocationSerializer(serializers.Serializer):
         required=False,
         label=_('Source Location'),
         help_text=_(
-            'Stock location where items are sourced (leave blank to use any location)'
+            'Further restrict stock to this location (intersected with each line item location)'
         ),
     )
 
@@ -2276,6 +2290,54 @@ class SalesOrderAutoAllocationSerializer(serializers.Serializer):
                     raise ValidationError(_('Line item does not belong to this order'))
 
         return line_items
+
+
+class SalesOrderAutoAllocationResultSerializer(serializers.Serializer):
+    """Read-only serializer for a single per-line auto-allocation result."""
+
+    class Meta:
+        """Metaclass options."""
+
+        fields = [
+            'line',
+            'part',
+            'part_name',
+            'location',
+            'location_name',
+            'required',
+            'allocated',
+            'available',
+            'status',
+        ]
+
+    line = serializers.IntegerField(read_only=True, label=_('Line Item'))
+    part = serializers.IntegerField(read_only=True, label=_('Part'))
+    part_name = serializers.CharField(read_only=True, label=_('Part Name'))
+    location = serializers.IntegerField(
+        read_only=True, allow_null=True, label=_('Stock Location')
+    )
+    location_name = serializers.CharField(
+        read_only=True, allow_null=True, label=_('Stock Location Name')
+    )
+    required = serializers.FloatField(read_only=True, label=_('Required Quantity'))
+    allocated = serializers.FloatField(read_only=True, label=_('Allocated Quantity'))
+    available = serializers.FloatField(read_only=True, label=_('Available Quantity'))
+    status = serializers.ChoiceField(
+        read_only=True,
+        choices=['allocated', 'partial', 'no_stock', 'no_location'],
+        label=_('Status'),
+    )
+
+
+class SalesOrderAutoAllocationResponseSerializer(serializers.Serializer):
+    """Response serializer for the sales order auto-allocation endpoint."""
+
+    class Meta:
+        """Metaclass options."""
+
+        fields = ['results']
+
+    results = SalesOrderAutoAllocationResultSerializer(many=True, read_only=True)
 
 
 @register_importer()

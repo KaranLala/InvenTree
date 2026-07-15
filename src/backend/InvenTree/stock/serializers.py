@@ -689,6 +689,42 @@ class StockItemSerializer(
     tags = common.filters.enable_tags_filter()
 
 
+class StockAggregateSerializer(serializers.Serializer):
+    """Read-only serializer for stock grouped by (part, location, serial).
+
+    Fork-specific: backs the FZ app's grouped stock browser, where multiple
+    discrete StockItem records of the same part in the same location are shown
+    as a single row with a summed available quantity. Serialized items keep
+    their own (singleton) group because the group key includes the serial.
+
+    Instances are the dict rows produced by a ``.values(...).annotate(...)``
+    aggregation (see ``stock.api.StockAggregateList``); ``source`` therefore
+    points at the exact aggregation keys.
+    """
+
+    part = serializers.IntegerField(read_only=True)
+    part_name = serializers.CharField(source='part__name', read_only=True)
+    part_IPN = serializers.CharField(
+        source='part__IPN', read_only=True, allow_null=True, allow_blank=True
+    )
+    location = serializers.IntegerField(read_only=True, allow_null=True)
+    location_name = serializers.CharField(
+        source='location__pathstring',
+        read_only=True,
+        allow_null=True,
+        allow_blank=True,
+    )
+    serial = serializers.CharField(
+        source='serial_key', read_only=True, allow_null=True, allow_blank=True
+    )
+    total_quantity = serializers.FloatField(read_only=True)
+    total_allocated = serializers.FloatField(read_only=True)
+    available = serializers.FloatField(read_only=True)
+    item_count = serializers.IntegerField(read_only=True)
+    # List of the underlying stock items: [{pk, quantity, batch, serial}, ...]
+    members = serializers.JSONField(read_only=True)
+
+
 class SerializeStockItemSerializer(serializers.Serializer):
     """A DRF serializer for "serializing" a StockItem.
 
