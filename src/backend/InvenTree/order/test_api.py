@@ -128,7 +128,7 @@ class PurchaseOrderTest(OrderTest):
         check_options(
             post,
             'tenant',
-            {'type': 'related field', 'read_only': False, 'label': 'Tenant'},
+            {'type': 'related field', 'read_only': False, 'label': 'Branch'},
         )
 
     def test_po_list(self):
@@ -1588,7 +1588,7 @@ class SalesOrderTest(OrderTest):
         tenant = post['tenant']
         self.assertEqual(tenant['type'], 'related field')
         self.assertFalse(tenant['read_only'])
-        self.assertEqual(tenant['label'], 'Tenant')
+        self.assertEqual(tenant['label'], 'Branch')
 
     def test_so_list(self):
         """Test the SalesOrder list API endpoint."""
@@ -2744,7 +2744,7 @@ class ReturnOrderTests(InvenTreeAPITestCase):
         tenant = post['tenant']
         self.assertEqual(tenant['type'], 'related field')
         self.assertFalse(tenant['read_only'])
-        self.assertEqual(tenant['label'], 'Tenant')
+        self.assertEqual(tenant['label'], 'Branch')
 
     def test_project_code(self):
         """Test the 'project_code' serializer field."""
@@ -4154,16 +4154,22 @@ class SalesOrderAutoAllocateAPITest(InvenTreeAPITestCase):
         )
 
         cls.loc_a = StockLocation.objects.create(name='Shelf A')
+        cls.loc_a_sub = StockLocation.objects.create(
+            name='Shelf A Sub', parent=cls.loc_a
+        )
         cls.loc_b = StockLocation.objects.create(name='Shelf B')
 
-    def _make_order(self, qty=50):
+    def _make_order(self, qty=50, location='default'):
         """Create a fresh SalesOrder with one line item and one shipment."""
         order = models.SalesOrder.objects.create(
             customer=self.customer,
             reference=f'SO-TEST-{models.SalesOrder.objects.count()}',
         )
         line = SalesOrderLineItem.objects.create(
-            order=order, part=self.part, quantity=qty
+            order=order,
+            part=self.part,
+            quantity=qty,
+            location=self.loc_a if location == 'default' else location,
         )
         shipment = SalesOrderShipment.objects.create(order=order)
         return order, line, shipment
@@ -4182,18 +4188,78 @@ class SalesOrderAutoAllocateAPITest(InvenTreeAPITestCase):
         self.post(self._url(order.pk), {}, expected_code=401)
 
     def test_basic_post_returns_200(self):
-        """POST with defaults runs synchronously in tests and returns 200."""
+        """POST with defaults allocates synchronously and returns per-line results."""
         order, line, _ = self._make_order()
-        StockItem.objects.create(part=self.part, quantity=100)
+        StockItem.objects.create(part=self.part, quantity=100, location=self.loc_a)
 
         response = self.post(self._url(order.pk), {}, expected_code=200)
 
-        self.assertIn('task_id', response.data)
-        self.assertTrue(response.data['complete'])
-        self.assertTrue(response.data['success'])
+        self.assertIn('results', response.data)
+        results = response.data['results']
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['line'], line.pk)
+        self.assertEqual(results[0]['status'], 'allocated')
+        self.assertEqual(results[0]['location'], self.loc_a.pk)
 
-        # Task ran synchronously — allocations are already committed
+        # Allocation is synchronous — already committed when the response returns
         self.assertTrue(line.is_fully_allocated())
+
+    def test_partial_allocation_reported(self):
+        """A location shortfall is partially allocated and reported."""
+        order, line, _ = self._make_order(qty=50)
+        StockItem.objects.create(part=self.part, quantity=30, location=self.loc_a)
+
+        response = self.post(self._url(order.pk), {}, expected_code=200)
+
+        result = response.data['results'][0]
+        self.assertEqual(result['status'], 'partial')
+        self.assertEqual(result['required'], 50)
+        self.assertEqual(result['allocated'], 30)
+        self.assertEqual(result['available'], 30)
+        self.assertEqual(result['part'], self.part.pk)
+
+        self.assertEqual(line.allocated_quantity(), 30)
+
+    def test_line_without_location_reported(self):
+        """A line without a location is skipped and reported as 'no_location'."""
+        order, line, _ = self._make_order(qty=10, location=None)
+        StockItem.objects.create(part=self.part, quantity=100, location=self.loc_a)
+
+        response = self.post(self._url(order.pk), {}, expected_code=200)
+
+        result = response.data['results'][0]
+        self.assertEqual(result['status'], 'no_location')
+        self.assertIsNone(result['location'])
+        self.assertEqual(SalesOrderAllocation.objects.filter(line=line).count(), 0)
+
+    def test_cross_tenant_line_location_rejected(self):
+        """Creating a line with a location from another tenant returns 400."""
+        from tenant.models import Tenant
+
+        default_tenant = Tenant.objects.first()
+        other_tenant = Tenant.objects.create(name='Other Tenant API')
+
+        order = models.SalesOrder.objects.create(
+            customer=self.customer,
+            reference=f'SO-TENANT-{models.SalesOrder.objects.count()}',
+            tenant=default_tenant,
+        )
+        foreign_loc = StockLocation.objects.create(
+            name='Foreign Shelf API', tenant=other_tenant
+        )
+
+        response = self.post(
+            reverse('api-so-line-list'),
+            {
+                'order': order.pk,
+                'part': self.part.pk,
+                'quantity': 1,
+                'location': foreign_loc.pk,
+            },
+            expected_code=400,
+        )
+
+        self.assertIn('location', response.data)
 
     def test_invalid_order_pk_returns_404(self):
         """POST to a non-existent order pk returns 404."""
@@ -4252,7 +4318,9 @@ class SalesOrderAutoAllocateAPITest(InvenTreeAPITestCase):
     def test_allocates_available_stock(self):
         """Stock is allocated to the line item after a successful POST."""
         order, line, _ = self._make_order(qty=30)
-        item = StockItem.objects.create(part=self.part, quantity=100)
+        item = StockItem.objects.create(
+            part=self.part, quantity=100, location=self.loc_a
+        )
 
         self.post(self._url(order.pk), {}, expected_code=200)
 
@@ -4268,15 +4336,15 @@ class SalesOrderAutoAllocateAPITest(InvenTreeAPITestCase):
             reference=f'SO-SUBSET-{models.SalesOrder.objects.count()}',
         )
         line_a = SalesOrderLineItem.objects.create(
-            order=order, part=self.part, quantity=10
+            order=order, part=self.part, quantity=10, location=self.loc_a
         )
         part_b = Part.objects.create(name='Part B', salable=True, description='')
         line_b = SalesOrderLineItem.objects.create(
-            order=order, part=part_b, quantity=10
+            order=order, part=part_b, quantity=10, location=self.loc_a
         )
 
-        StockItem.objects.create(part=self.part, quantity=50)
-        StockItem.objects.create(part=part_b, quantity=50)
+        StockItem.objects.create(part=self.part, quantity=50, location=self.loc_a)
+        StockItem.objects.create(part=part_b, quantity=50, location=self.loc_a)
 
         self.post(self._url(order.pk), {'line_items': [line_a.pk]}, expected_code=200)
 
@@ -4287,10 +4355,10 @@ class SalesOrderAutoAllocateAPITest(InvenTreeAPITestCase):
         """serialized_stock='serialized' allocates only serialized items."""
         order, line, _ = self._make_order(qty=1)
         # Unserialized item
-        StockItem.objects.create(part=self.part, quantity=50)
+        StockItem.objects.create(part=self.part, quantity=50, location=self.loc_a)
         # Serialized item
         serial_item = StockItem.objects.create(
-            part=self.part, quantity=1, serial='SN-001'
+            part=self.part, quantity=1, serial='SN-001', location=self.loc_a
         )
 
         self.post(
@@ -4306,7 +4374,9 @@ class SalesOrderAutoAllocateAPITest(InvenTreeAPITestCase):
         order, line, _ = self._make_order(qty=10)
         # Serialized items only
         for sn in range(10):
-            StockItem.objects.create(part=self.part, quantity=1, serial=f'SN-{sn}')
+            StockItem.objects.create(
+                part=self.part, quantity=1, serial=f'SN-{sn}', location=self.loc_a
+            )
 
         self.post(
             self._url(order.pk), {'serialized_stock': 'unserialized'}, expected_code=200
@@ -4318,8 +4388,10 @@ class SalesOrderAutoAllocateAPITest(InvenTreeAPITestCase):
     def test_stock_sort_by_quantity_asc(self):
         """stock_sort_by=QUANTITY_ASC consumes the smallest lot first."""
         order, line, _ = self._make_order(qty=15)
-        small = StockItem.objects.create(part=self.part, quantity=5)
-        StockItem.objects.create(part=self.part, quantity=100)
+        small = StockItem.objects.create(
+            part=self.part, quantity=5, location=self.loc_a
+        )
+        StockItem.objects.create(part=self.part, quantity=100, location=self.loc_a)
 
         self.post(
             self._url(order.pk),
@@ -4336,8 +4408,8 @@ class SalesOrderAutoAllocateAPITest(InvenTreeAPITestCase):
     def test_stock_sort_by_quantity_desc(self):
         """stock_sort_by=QUANTITY_DESC consumes the largest lot first, covering the requirement in one allocation."""
         order, line, _ = self._make_order(qty=15)
-        StockItem.objects.create(part=self.part, quantity=5)
-        StockItem.objects.create(part=self.part, quantity=100)
+        StockItem.objects.create(part=self.part, quantity=5, location=self.loc_a)
+        StockItem.objects.create(part=self.part, quantity=100, location=self.loc_a)
 
         self.post(
             self._url(order.pk),
@@ -4353,11 +4425,18 @@ class SalesOrderAutoAllocateAPITest(InvenTreeAPITestCase):
         self.assertEqual(allocs.first().quantity, 15)
 
     def test_location_filter(self):
-        """Only stock within the specified location is used."""
-        order, line, _ = self._make_order(qty=10)
+        """The order-wide location parameter intersects each line's own location."""
+        order, line, _ = self._make_order(qty=10)  # line location = loc_a
         StockItem.objects.create(part=self.part, quantity=50, location=self.loc_a)
-        StockItem.objects.create(part=self.part, quantity=50, location=self.loc_b)
 
+        # Disjoint location: no stock can satisfy both trees
+        response = self.post(
+            self._url(order.pk), {'location': self.loc_b.pk}, expected_code=200
+        )
+        self.assertEqual(response.data['results'][0]['status'], 'no_stock')
+        self.assertEqual(SalesOrderAllocation.objects.filter(line=line).count(), 0)
+
+        # Matching location: allocation proceeds
         self.post(self._url(order.pk), {'location': self.loc_a.pk}, expected_code=200)
 
         allocs = SalesOrderAllocation.objects.filter(line=line)
@@ -4366,22 +4445,24 @@ class SalesOrderAutoAllocateAPITest(InvenTreeAPITestCase):
 
     def test_exclude_location_filter(self):
         """Stock in the excluded location is not used."""
-        order, line, _ = self._make_order(qty=10)
+        order, line, _ = self._make_order(qty=10)  # line location = loc_a
+        StockItem.objects.create(part=self.part, quantity=50, location=self.loc_a_sub)
         StockItem.objects.create(part=self.part, quantity=50, location=self.loc_a)
-        StockItem.objects.create(part=self.part, quantity=50, location=self.loc_b)
 
         self.post(
-            self._url(order.pk), {'exclude_location': self.loc_a.pk}, expected_code=200
+            self._url(order.pk),
+            {'exclude_location': self.loc_a_sub.pk},
+            expected_code=200,
         )
 
         allocs = SalesOrderAllocation.objects.filter(line=line)
         self.assertEqual(allocs.count(), 1)
-        self.assertEqual(allocs.first().item.location, self.loc_b)
+        self.assertEqual(allocs.first().item.location, self.loc_a)
 
     def test_shipment_assigned_to_allocations(self):
         """When a shipment is specified, all allocations are assigned to it."""
         order, line, shipment = self._make_order(qty=20)
-        StockItem.objects.create(part=self.part, quantity=100)
+        StockItem.objects.create(part=self.part, quantity=100, location=self.loc_a)
 
         self.post(self._url(order.pk), {'shipment': shipment.pk}, expected_code=200)
 
@@ -4393,8 +4474,8 @@ class SalesOrderAutoAllocateAPITest(InvenTreeAPITestCase):
     def test_interchangeable_false_skips_split_stock(self):
         """With interchangeable=False, allocation is skipped when no single item covers the full quantity."""
         order, line, _ = self._make_order(qty=50)
-        StockItem.objects.create(part=self.part, quantity=20)
-        StockItem.objects.create(part=self.part, quantity=20)
+        StockItem.objects.create(part=self.part, quantity=20, location=self.loc_a)
+        StockItem.objects.create(part=self.part, quantity=20, location=self.loc_a)
 
         self.post(self._url(order.pk), {'interchangeable': False}, expected_code=200)
 

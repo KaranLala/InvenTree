@@ -15,6 +15,7 @@ import {
 import { notifications } from '@mantine/notifications';
 import { IconArrowLeft, IconExternalLink } from '@tabler/icons-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
 import { ApiEndpoints } from '@lib/enums/ApiEndpoints';
@@ -24,10 +25,13 @@ import { apiUrl } from '@lib/functions/Api';
 import { StatusRenderer } from '../../../components/render/StatusRenderer';
 import { useApi } from '../../../contexts/ApiContext';
 import { formatCurrency } from '../../../defaults/formatters';
+import { useSalesOrderFields } from '../../../forms/SalesOrderForms';
+import { useEditApiFormModal } from '../../../hooks/UseForm';
 import { useUserState } from '../../../states/UserState';
 import { extractErrorMessage } from '../../api/errors';
 import { SO_EDITABLE_STATUSES, soActions } from '../../api/soStatus';
 import { fzKey, listResults, useBranchQuery } from '../../api/useBranchQuery';
+import OrderPartyCard from '../../components/OrderPartyCard';
 import { useBranchState } from '../../state/BranchState';
 import LineItemGrid from './LineItemGrid';
 import ShipmentPanel from './ShipmentPanel';
@@ -51,7 +55,11 @@ export default function FzSalesOrderDetail() {
     key: ['so', orderId, 'detail'],
     endpoint: ApiEndpoints.sales_order_list,
     pk: orderId,
-    params: { customer_detail: true },
+    params: {
+      customer_detail: true,
+      contact_detail: true,
+      address_detail: true
+    },
     scoped: false
   });
 
@@ -74,6 +82,26 @@ export default function FzSalesOrderDetail() {
       queryKey: fzKey(branchId, 'sales-orders')
     });
   };
+
+  const orderFields = useSalesOrderFields({});
+
+  // Focused editor: only the customer / contact / address of the order
+  const partyFields = useMemo(
+    () => ({
+      customer: orderFields.customer,
+      contact: orderFields.contact,
+      address: orderFields.address
+    }),
+    [orderFields]
+  );
+
+  const editOrder = useEditApiFormModal({
+    url: ApiEndpoints.sales_order_list,
+    pk: orderId,
+    title: 'Edit Customer',
+    fields: partyFields,
+    onFormSuccess: invalidateAll
+  });
 
   const actionMutation = useMutation({
     mutationFn: async (endpoint: ApiEndpoints) =>
@@ -138,6 +166,7 @@ export default function FzSalesOrderDetail() {
 
   return (
     <Stack data-testid='fz-so-detail'>
+      {editOrder.modal}
       <Group justify='space-between' wrap='nowrap' align='flex-start'>
         <Group gap='sm' wrap='nowrap'>
           <ActionIcon
@@ -205,6 +234,16 @@ export default function FzSalesOrderDetail() {
           </Tooltip>
         </Group>
       </Group>
+
+      <OrderPartyCard
+        label='Customer'
+        company={order.customer_detail}
+        contact={order.contact_detail}
+        address={order.address_detail}
+        canEdit={user.hasChangeRole(UserRoles.sales_order)}
+        onEdit={editOrder.open}
+        testId='fz-so-customer'
+      />
 
       <Card withBorder p='sm'>
         <Group gap='xl'>

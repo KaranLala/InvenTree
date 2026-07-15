@@ -58,3 +58,30 @@ test('FZ Stock - Adjust and transfer modals open', async ({ page }) => {
   await page.getByLabel('transfer-destination').waitFor();
   await page.getByRole('button', { name: 'Cancel' }).click();
 });
+
+test('FZ Stock - Add stock modal opens with part, location and quantity', async ({
+  page
+}) => {
+  await doLogin(page);
+  await navigate(page, 'b/stock/');
+  await page.waitForURL('**/web/b/stock/');
+  await page.getByTestId('fz-stock-table').waitFor();
+
+  // Open the "Add stock" modal from the header
+  await page.getByTestId('fz-add-stock').click();
+
+  // The three core inputs are present
+  await page.getByTestId('fz-new-stock-part').waitFor();
+  await page.getByTestId('fz-new-stock-location').waitFor();
+  await page.getByTestId('fz-new-stock-quantity').waitFor();
+
+  // Submit stays disabled until a part and location are chosen
+  await expect(page.getByTestId('fz-new-stock-save')).toBeDisabled();
+
+  // The part search returns matching options
+  await page.getByTestId('fz-new-stock-part').fill('a');
+  await page.getByRole('option').first().waitFor();
+  await page.getByRole('option').first().click();
+
+  await page.getByRole('button', { name: 'Cancel' }).click();
+});

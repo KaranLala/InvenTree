@@ -1,10 +1,18 @@
 """InvenTree API version information."""
 
 # InvenTree API version
-INVENTREE_API_VERSION = 513
+INVENTREE_API_VERSION = 515
 """Increment this API version number whenever there is a significant change to the API that any clients need to know about."""
 
 INVENTREE_API_TEXT = """
+
+v515 -> 2026-07-09 : (fork)
+    - Adds read-only StockItem aggregate list endpoint (stock/aggregate/) grouping stock by part + location (serialized items kept separate); used by the FZ app stock browser
+
+v514 -> 2026-07-08 : (fork)
+    - Adds 'location' and 'location_detail' fields to the SalesOrderLineItem serializer
+    - SalesOrder auto-allocate endpoint now runs synchronously and returns per-line allocation results
+    - Auto-allocation only sources stock from each line item's own location; the order-wide 'location' parameter now further restricts (intersects) the line locations
 
 v513 -> 2026-07-08 : (fork)
     - Adds 'customer' filter to the PartSalePrice list API

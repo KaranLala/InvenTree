@@ -3,7 +3,6 @@ import {
   Group,
   Modal,
   NumberInput,
-  Select,
   Stack,
   Table,
   Text,
@@ -11,17 +10,14 @@ import {
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useMutation } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { ApiEndpoints } from '@lib/enums/ApiEndpoints';
 import { apiUrl } from '@lib/functions/Api';
 import { useApi } from '../../../contexts/ApiContext';
 import { extractErrorMessage } from '../../api/errors';
-import {
-  listResults,
-  useBranchQuery,
-  useInvalidateBranch
-} from '../../api/useBranchQuery';
+import { useInvalidateBranch } from '../../api/useBranchQuery';
+import FzLocationSelect from '../../components/FzLocationSelect';
 
 /**
  * Transfer one or more stock items to another location within the
@@ -45,22 +41,6 @@ export default function TransferModal({
     {}
   );
   const [notes, setNotes] = useState('');
-
-  const { data: locationData } = useBranchQuery({
-    key: ['stock-locations', 'transfer-destinations'],
-    endpoint: ApiEndpoints.stock_location_list,
-    params: { structural: false },
-    enabled: opened
-  });
-
-  const locationOptions = useMemo(
-    () =>
-      listResults(locationData).map((location: any) => ({
-        value: String(location.pk),
-        label: location.pathstring || location.name
-      })),
-    [locationData]
-  );
 
   useEffect(() => {
     if (opened) {
@@ -112,13 +92,12 @@ export default function TransferModal({
   return (
     <Modal opened={opened} onClose={onClose} title='Transfer stock' size='lg'>
       <Stack>
-        <Select
+        <FzLocationSelect
           label='Destination'
           description='Locations in the active branch'
-          data={locationOptions}
           value={destination}
           onChange={setDestination}
-          searchable
+          enabled={opened}
           required
           aria-label='transfer-destination'
         />
