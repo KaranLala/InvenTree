@@ -64,7 +64,8 @@ fz/
   api/soStatus.ts             SO status map + soActions() — Phase 2 approval hook
   api/poStatus.ts             PO equivalent
   api/priceBreaks.ts          customer-aware price break selection
-  pages/so/  pages/po/  pages/stock/  pages/items/
+  pages/so/  pages/po/  pages/stock/  pages/items/  pages/companies/
+  pages/branches/             branch + per-branch stock location management
 ```
 
 Patterns to clone: list page = `pages/so/FzSalesOrderList.tsx`; side drawer =

@@ -153,6 +153,12 @@ export const FzCompanyList = Loadable(
 export const FzCompanyDetail = Loadable(
   lazy(() => import('./fz/pages/companies/FzCompanyDetail'))
 );
+export const FzBranchList = Loadable(
+  lazy(() => import('./fz/pages/branches/FzBranchList'))
+);
+export const FzBranchDetail = Loadable(
+  lazy(() => import('./fz/pages/branches/FzBranchDetail'))
+);
 
 // Auth
 export const Login = Loadable(lazy(() => import('./pages/Auth/Login')));
@@ -200,6 +206,8 @@ export const routes = (
         path='suppliers/:id'
         element={<FzCompanyDetail kind='supplier' />}
       />
+      <Route path='branches/' element={<FzBranchList />} />
+      <Route path='branches/:id' element={<FzBranchDetail />} />
     </Route>
     <Route path='/' element={<LayoutComponent />} errorElement={<ErrorPage />}>
       <Route index element={<Navigate to='/b/' replace />} />,

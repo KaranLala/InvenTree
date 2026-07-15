@@ -1,7 +1,15 @@
-import { Alert, AppShell, Center, Loader, Stack, Text } from '@mantine/core';
+import {
+  Alert,
+  AppShell,
+  Button,
+  Center,
+  Loader,
+  Stack,
+  Text
+} from '@mantine/core';
 import { IconBuildingStore } from '@tabler/icons-react';
 import { useEffect } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 
 import { Boundary } from '@lib/components/Boundary';
 import FzProtectedRoute from './FzProtectedRoute';
@@ -25,6 +33,12 @@ export default function FzLayout() {
 function FzShell() {
   const { data: branches, isLoading, isError } = useBranches();
   const { activeBranchId, setActiveBranch } = useBranchState();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // The branch management pages don't need an active branch — they must
+  // stay reachable when no branch exists yet (that's where you create one)
+  const isBranchAdminPage = location.pathname.startsWith('/b/branches');
 
   // Bootstrap: default to the first active branch if none is selected,
   // or if the persisted selection is no longer an active branch.
@@ -50,7 +64,7 @@ function FzShell() {
       </AppShell.Header>
       <AppShell.Main>
         <Boundary label='fz-layout'>
-          {branchReady ? (
+          {branchReady || isBranchAdminPage ? (
             <Outlet />
           ) : isLoading ? (
             <Center h='60vh'>
@@ -70,9 +84,10 @@ function FzShell() {
                 <Text fw={600} size='lg'>
                   No active branches
                 </Text>
-                <Text c='dimmed'>
-                  Create a branch in the Admin Center before using this app.
-                </Text>
+                <Text c='dimmed'>Create a branch before using this app.</Text>
+                <Button onClick={() => navigate('/b/branches/')}>
+                  Manage branches
+                </Button>
               </Stack>
             </Center>
           )}

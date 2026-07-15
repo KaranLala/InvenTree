@@ -51,6 +51,12 @@ const GLOBAL_SECTIONS = [
     label: 'Suppliers',
     path: '/b/suppliers/',
     icon: IconTruck
+  },
+  {
+    key: 'branches',
+    label: 'Branches',
+    path: '/b/branches/',
+    icon: IconBuildingStore
   }
 ] as const;
 
