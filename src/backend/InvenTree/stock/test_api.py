@@ -1451,9 +1451,7 @@ class StockAggregateListTest(StockAPITestCase):
             name='Agg Customer', description='c', is_customer=True
         )
         part = Part.objects.create(
-            name='Allocatable Part',
-            description='A part to allocate',
-            salable=True,
+            name='Allocatable Part', description='A part to allocate', salable=True
         )
         location = StockLocation.objects.create(name='Alloc Location')
 
@@ -1489,9 +1487,7 @@ class StockAggregateListTest(StockAPITestCase):
         This is the reason the grouping is done server-side: pagination and the
         total count must be correct across pages.
         """
-        part = Part.objects.create(
-            name='Paginated Part', description='p', salable=True
-        )
+        part = Part.objects.create(name='Paginated Part', description='p', salable=True)
         # Three locations, each holding two stock items of the part → three
         # groups made of six underlying stock items.
         locations = [
@@ -1512,9 +1508,7 @@ class StockAggregateListTest(StockAPITestCase):
 
     def test_no_location_group(self):
         """Items without a location group together under location='null'."""
-        part = Part.objects.create(
-            name='Homeless Part', description='h', salable=True
-        )
+        part = Part.objects.create(name='Homeless Part', description='h', salable=True)
         StockItem.objects.create(part=part, location=None, quantity=4)
         StockItem.objects.create(part=part, location=None, quantity=6)
 
@@ -1530,9 +1524,7 @@ class StockAggregateListTest(StockAPITestCase):
 
     def test_cascade_includes_sublocations(self):
         """cascade=True pulls in child-location stock as its own group."""
-        part = Part.objects.create(
-            name='Cascade Part', description='c', salable=True
-        )
+        part = Part.objects.create(name='Cascade Part', description='c', salable=True)
         parent = StockLocation.objects.create(name='Cascade Parent')
         child = StockLocation.objects.create(name='Cascade Child', parent=parent)
 

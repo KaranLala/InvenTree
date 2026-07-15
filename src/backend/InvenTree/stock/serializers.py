@@ -704,15 +704,12 @@ class StockAggregateSerializer(serializers.Serializer):
 
     part = serializers.IntegerField(read_only=True)
     part_name = serializers.CharField(source='part__name', read_only=True)
-    part_IPN = serializers.CharField(
+    part_IPN = serializers.CharField(  # noqa: N815
         source='part__IPN', read_only=True, allow_null=True, allow_blank=True
     )
     location = serializers.IntegerField(read_only=True, allow_null=True)
     location_name = serializers.CharField(
-        source='location__pathstring',
-        read_only=True,
-        allow_null=True,
-        allow_blank=True,
+        source='location__pathstring', read_only=True, allow_null=True, allow_blank=True
     )
     serial = serializers.CharField(
         source='serial_key', read_only=True, allow_null=True, allow_blank=True

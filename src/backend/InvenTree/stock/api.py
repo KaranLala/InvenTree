@@ -1430,7 +1430,8 @@ class StockAggregateList(ListAPI):
         ) + Coalesce(SubquerySum('allocations__quantity'), Value(Decimal(0)))
 
         return (
-            queryset.values(
+            queryset
+            .values(
                 'part',
                 'location',
                 'part__name',
@@ -1909,11 +1910,7 @@ stock_api_urls = [
         name='api-stock-status-codes',
     ),
     # Stock grouped by (part, location) — fork-specific, used by the FZ app
-    path(
-        'aggregate/',
-        StockAggregateList.as_view(),
-        name='api-stock-aggregate-list',
-    ),
+    path('aggregate/', StockAggregateList.as_view(), name='api-stock-aggregate-list'),
     # Anything else
     path('', StockList.as_view(), name='api-stock-list'),
 ]

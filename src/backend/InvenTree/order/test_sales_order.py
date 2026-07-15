@@ -979,9 +979,7 @@ class SalesOrderAutoAllocateTest(InvenTreeTestCase):
         default_tenant = Tenant.objects.first()
         other_tenant = Tenant.objects.create(name='Other Tenant 2')
 
-        order = SalesOrder.objects.create(
-            customer=self.customer, tenant=default_tenant
-        )
+        order = SalesOrder.objects.create(customer=self.customer, tenant=default_tenant)
         foreign_loc = StockLocation.objects.create(
             name='Foreign Shelf 2', tenant=other_tenant
         )
